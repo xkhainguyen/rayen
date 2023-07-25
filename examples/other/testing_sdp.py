@@ -7,20 +7,11 @@ import torch
 import scipy
 
 
-A=torch.Tensor([
+A = torch.Tensor(
+    [[[2.0, -12.0], [1.0, -5.0]], [[-7.0, 0.0], [0.0, 5.0]], [[-2.0, 0.0], [0.0, 6.0]]]
+)
 
-                [[2.0, -12.0],
-                 [1.0, -5.0]],
-
-                [[-7.0, 0.0],
-                 [0.0, 5.0]],
-
-                [[-2.0, 0.0],
-                 [0.0, 6.0]]
-
-                ])
-
-guess_v = torch.nn.functional.normalize(torch.rand(A.shape[1],1), dim=0)
+guess_v = torch.nn.functional.normalize(torch.rand(A.shape[1], 1), dim=0)
 
 lamb = utils.findLargestEigenvalue(A, guess_v)
 
@@ -31,31 +22,28 @@ print(f"Found lambda={lamb}")
 
 exit()
 
-dim=3
+dim = 3
 
 for trial in range(200):
-
     # Generate a random SDP.
     tmp = np.random.rand(dim, dim)
     # tmp = np.random.randint(0, 20, size=(dim, dim))
-    H = np.dot(tmp, tmp.transpose()) + np.eye(dim) #H is psd by construction
+    H = np.dot(tmp, tmp.transpose()) + np.eye(dim)  # H is psd by construction
 
     tmp = np.random.rand(dim, dim)
     # tmp = np.random.randint(0, 20, size=(dim, dim))
-    S=(tmp+tmp.T)/2.0  #M is symmetric by construction
+    S = (tmp + tmp.T) / 2.0  # M is symmetric by construction
 
     # tmp = np.random.rand(dim, dim)
     # M = np.dot(tmp, tmp.transpose()) #H is psd by construction
 
-    Hinv=np.linalg.inv(H)
+    Hinv = np.linalg.inv(H)
 
     print("\n\n-------")
     print("-------")
 
     print(f"H={H}\n")
     print(f"S={S}\n")
-
-
 
     # kappa_opt = cp.Variable()
     # constraints = [(kappa_opt*H+S) >> 0, kappa_opt>=0]
@@ -69,11 +57,16 @@ for trial in range(200):
     #     kappa_opt=kappa_opt.value
     #     utils.printInBoldBlue(f"kappa_opt={kappa_opt}")
 
-
-    X=np.random.rand(S.shape[0], 1)
+    X = np.random.rand(S.shape[0], 1)
 
     #### USING lobpcg
-    kappa_lobpcg, _ = torch.lobpcg(A=torch.from_numpy(-S), k=1, B=torch.from_numpy(H), niter=-1, X=torch.from_numpy(X))
+    kappa_lobpcg, _ = torch.lobpcg(
+        A=torch.from_numpy(-S),
+        k=1,
+        B=torch.from_numpy(H),
+        niter=-1,
+        X=torch.from_numpy(X),
+    )
     # kappa_lobpcg = torch.relu(kappa_lobpcg).item()
     kappa_lobpcg = kappa_lobpcg.item()
     utils.printInBoldBlue(f"kappa_lobpcg={kappa_lobpcg}")
@@ -84,24 +77,23 @@ for trial in range(200):
     # utils.printInBoldBlue(f"kappa_scipy={kappa_scipy}")
 
     #### USING normal eigendecomposition
-    all_kappas, _ = np.linalg.eig(-Hinv@S); #Be careful because Hinv@M is NOT symmetric (Hinv and M is)
+    all_kappas, _ = np.linalg.eig(-Hinv @ S)
+    # Be careful because Hinv@M is NOT symmetric (Hinv and M is)
     print(f"all_kappas={all_kappas}")
     # kappa_eig=np.maximum(np.max(all_kappas),0.0)
-    kappa_eig=np.max(all_kappas)
+    kappa_eig = np.max(all_kappas)
     utils.printInBoldBlue(f"kappa_eig={kappa_eig}")
 
-    tol=1e-6
-    assert abs(kappa_lobpcg-kappa_eig)<tol
+    tol = 1e-6
+    assert abs(kappa_lobpcg - kappa_eig) < tol
     # assert abs(kappa_scipy-kappa_eig)<tol
     # assert abs(kappa_opt-kappa_eig)<tol #This one sometimes fails due to inaccuracies in the optimization
-
 
 
 # LPBPCG algorithm is not applicable when the number of A rows (=2) is smaller than 3 x the number of requested eigenpairs (=1)
 
 
-
-#This should be zero
+# This should be zero
 # print(np.linalg.det(H+lam.value*M))
 
 # print(np.linalg.det(Minv@H+lam.value*np.eye(2)))
@@ -160,10 +152,7 @@ for trial in range(200):
 # print(f"lam={lam.value}")
 
 
-
-
-
-#Inspired by https://github.com/rfeinman/Torch-ARPACK/blob/master/arpack/power_iteration.py
+# Inspired by https://github.com/rfeinman/Torch-ARPACK/blob/master/arpack/power_iteration.py
 # def power_iteration(A, tol=1e-20, max_iter=10000, eps=1e-12, check_freq=2):
 
 #     v = torch.nn.functional.normalize(torch.rand(A.shape[1],1), dim=0)
@@ -183,10 +172,10 @@ for trial in range(200):
 #             print(f"converging before={converging}")
 
 #             u[converging,:,:] = torch.nn.functional.normalize(A[converging,:,:]@v[converging,:,:], dim=1)
-                
+
 #             distance=torch.abs(1 - torch.abs(  torch.transpose(v,1,2)@u ))
 #             print(f"distance={distance}")
-            
+
 #             v[converging,:,:] = u[converging,:,:]
 
 #             converging = (distance>tol).flatten()
@@ -200,7 +189,6 @@ for trial in range(200):
 #     else:
 #         warnings.warn('power iteration did not converge')
 
-        
 
 #     lamb =  torch.transpose(v,1,2)@A@v #torch.dot(v, torch.mv(A, v))
 

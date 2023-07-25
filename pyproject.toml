@@ -35,3 +35,7 @@ license = {file = "LICENSE"}
 
 [tool.setuptools]
 py-modules = []
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
