@@ -558,6 +558,88 @@ class ConstraintModule(torch.nn.Module):
         return kappa
 
     # TODO
+    # Function to recompute and register params
+    def updateAndRegisterParams(self):
+        self.register_buffer("A_p", torch.Tensor(self.cs.A_p))
+        self.register_buffer("b_p", torch.Tensor(self.cs.b_p))
+        self.register_buffer("yp", torch.Tensor(self.cs.yp))
+        self.register_buffer("NA_E", torch.Tensor(self.cs.NA_E))
+
+        self.y0 = self.gety0()
+
+        self.cs.z0 = self.z0.detach().cpu().numpy()
+        self.cs.y0 = self.y0.detach().cpu().numpy()
+
+        # Precompute for inverse distance to the frontier of Z along v_bar
+        D = self.cs.A_p / (
+            (self.cs.b_p - self.cs.A_p @ self.cs.z0) @ np.ones((1, self.n))
+        )  # for linear
+
+        all_P, all_q, all_r = utils.getAllPqrFromQcs(self.cs.qcs)
+        all_M, all_s, all_c, all_d = utils.getAllMscdFromSocs(self.cs.socs)
+
+        if self.cs.has_lmi_constraints:
+            all_F = copy.deepcopy(self.cs.lmic.all_F)
+            H = all_F[-1]
+            for i in range(self.cs.lmic.dim()):
+                H += self.cs.y0[i, 0] * self.cs.lmic.all_F[i]
+            Hinv = np.linalg.inv(H)
+            mHinv = -Hinv
+            L = np.linalg.cholesky(Hinv)  # Hinv = L @ L^T
+            self.register_buffer("mHinv", torch.Tensor(mHinv))
+            self.register_buffer("L", torch.Tensor(L))
+
+        else:
+            all_F = []
+
+        # See https://discuss.pytorch.org/t/model-cuda-does-not-convert-all-variables-to-cuda/114733/9
+        # and https://discuss.pytorch.org/t/keeping-constant-value-in-module-on-correct-device/10129
+        self.register_buffer("D", torch.Tensor(D))
+        self.register_buffer("all_P", torch.Tensor(np.array(all_P)))
+        self.register_buffer("all_q", torch.Tensor(np.array(all_q)))
+        self.register_buffer("all_r", torch.Tensor(np.array(all_r)))
+        self.register_buffer("all_M", torch.Tensor(np.array(all_M)))
+        self.register_buffer("all_s", torch.Tensor(np.array(all_s)))
+        self.register_buffer("all_c", torch.Tensor(np.array(all_c)))
+        self.register_buffer("all_d", torch.Tensor(np.array(all_d)))
+        # self.register_buffer("all_F", torch.Tensor(np.array(all_F))) #This one dies (probably because out of memory) when all_F contains more than 7000 matrices 500x500 approx
+        self.register_buffer("all_F", torch.Tensor(all_F))
+
+        # self.register_buffer("z0", torch.Tensor(self.z0))
+        # self.register_buffer("y0", torch.Tensor(self.y0))
+
+        # Precompute to find roots of quadratic equation
+        if self.cs.has_quadratic_constraints:
+            all_delta = []
+            all_phi = []
+
+            for i in range(
+                self.all_P.shape[0]
+            ):  # for each of the quadratic constraints
+                P = self.all_P[i, :, :]
+                q = self.all_q[i, :, :]
+                r = self.all_r[i, :, :]
+                y0 = self.y0
+
+                sigma = 2 * (0.5 * y0.T @ P @ y0 + q.T @ y0 + r)
+                phi = -(y0.T @ P + q.T) / sigma
+                delta = (
+                    (y0.T @ P + q.T).T @ (y0.T @ P + q.T)
+                    - 4 * (0.5 * y0.T @ P @ y0 + q.T @ y0 + r) * 0.5 * P
+                ) / torch.square(sigma)
+
+                all_delta.append(delta)
+                all_phi.append(phi)
+
+            all_delta = torch.stack(all_delta)
+            all_phi = torch.stack(all_phi)
+
+            self.register_buffer("all_delta", all_delta)
+            self.register_buffer("all_phi", all_phi)
+
+        return True
+
+    # TODO
     # Setup interior point problem beforehand
     def setupInteriorPointLayer(self):
         self.ip_epsilon = cp.Variable()
@@ -613,83 +695,6 @@ class ConstraintModule(torch.nn.Module):
         return ip_z0
 
     # TODO
-    # Function to recompute and register params
-    def updateAndRegisterParams(self):
-        # Precompute for inverse distance to the frontier of Z along v_bar
-        D = self.cs.A_p / (
-            (self.cs.b_p - self.cs.A_p @ self.cs.z0) @ np.ones((1, self.n))
-        )  # for linear
-
-        all_P, all_q, all_r = utils.getAllPqrFromQcs(self.cs.qcs)
-        all_M, all_s, all_c, all_d = utils.getAllMscdFromSocs(self.cs.socs)
-
-        if self.cs.has_lmi_constraints:
-            all_F = copy.deepcopy(self.cs.lmic.all_F)
-            H = all_F[-1]
-            for i in range(self.cs.lmic.dim()):
-                H += self.cs.y0[i, 0] * self.cs.lmic.all_F[i]
-            Hinv = np.linalg.inv(H)
-            mHinv = -Hinv
-            L = np.linalg.cholesky(Hinv)  # Hinv = L @ L^T
-            self.register_buffer("mHinv", torch.Tensor(mHinv))
-            self.register_buffer("L", torch.Tensor(L))
-
-        else:
-            all_F = []
-
-        # See https://discuss.pytorch.org/t/model-cuda-does-not-convert-all-variables-to-cuda/114733/9
-        # and https://discuss.pytorch.org/t/keeping-constant-value-in-module-on-correct-device/10129
-        self.register_buffer("D", torch.Tensor(D))
-        self.register_buffer("all_P", torch.Tensor(np.array(all_P)))
-        self.register_buffer("all_q", torch.Tensor(np.array(all_q)))
-        self.register_buffer("all_r", torch.Tensor(np.array(all_r)))
-        self.register_buffer("all_M", torch.Tensor(np.array(all_M)))
-        self.register_buffer("all_s", torch.Tensor(np.array(all_s)))
-        self.register_buffer("all_c", torch.Tensor(np.array(all_c)))
-        self.register_buffer("all_d", torch.Tensor(np.array(all_d)))
-        # self.register_buffer("all_F", torch.Tensor(np.array(all_F))) #This one dies (probably because out of memory) when all_F contains more than 7000 matrices 500x500 approx
-        self.register_buffer("all_F", torch.Tensor(all_F))
-        self.register_buffer("A_p", torch.Tensor(self.cs.A_p))
-        self.register_buffer("b_p", torch.Tensor(self.cs.b_p))
-        self.register_buffer("yp", torch.Tensor(self.cs.yp))
-        self.register_buffer("NA_E", torch.Tensor(self.cs.NA_E))
-        # self.register_buffer("z0", torch.Tensor(self.z0))
-        # self.register_buffer("y0", torch.Tensor(self.y0))
-
-        self.y0 = self.gety0()
-
-        # Precompute to find roots of quadratic equation
-        if self.cs.has_quadratic_constraints:
-            all_delta = []
-            all_phi = []
-
-            for i in range(
-                self.all_P.shape[0]
-            ):  # for each of the quadratic constraints
-                P = self.all_P[i, :, :]
-                q = self.all_q[i, :, :]
-                r = self.all_r[i, :, :]
-                y0 = self.y0
-
-                sigma = 2 * (0.5 * y0.T @ P @ y0 + q.T @ y0 + r)
-                phi = -(y0.T @ P + q.T) / sigma
-                delta = (
-                    (y0.T @ P + q.T).T @ (y0.T @ P + q.T)
-                    - 4 * (0.5 * y0.T @ P @ y0 + q.T @ y0 + r) * 0.5 * P
-                ) / torch.square(sigma)
-
-                all_delta.append(delta)
-                all_phi.append(phi)
-
-            all_delta = torch.stack(all_delta)
-            all_phi = torch.stack(all_phi)
-
-            self.register_buffer("all_delta", all_delta)
-            self.register_buffer("all_phi", all_phi)
-
-        return True
-
-    # TODO
     # Forward pass for RAYEN
     def forwardForRAYEN(self, q):
         # nn.Module forward method only accepts a single input tensor
@@ -705,25 +710,23 @@ class ConstraintModule(torch.nn.Module):
         #     self.cs.updateConstraintSet(x)
 
         #     # Check current y0 if it is still interior point
-        #     if self.cs.isInteriorPoint(self.y0):
+        #     if self.cs.isInteriorPoint(self.cs.y0):
         #         # Just update z0 and related linear params
         #         pass
         #     else:
         #         # Solve interior point
         #         self.z0 = self.solveInteriorPoint()
-        #         self.y0 = self.gety0()
-
         #         # Update and register all necessary parameters
         #         self.updateAndRegisterParams()
 
-        if 1:
+        if self.cs.z0 is None:
             print("Online Interior Point")
+
+            # Obtain new interior point
             self.z0 = self.solveInteriorPoint()[0]
-            self.cs.z0 = self.z0.detach().cpu().numpy()
-            # print(self.z0)
-            # print(self.y0)
+
+            # Update related params
             self.updateAndRegisterParams()
-            self.cs.y0 = self.y0.detach().cpu().numpy()
 
         v_bar = torch.nn.functional.normalize(v, dim=1)
         kappa = self.computeKappa(v_bar)

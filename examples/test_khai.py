@@ -22,7 +22,7 @@ import fixpath  # Following this example: https://github.com/tartley/colorama/bl
 from rayen import constraints, constraint_module, utils
 
 method = "RAYEN"
-index_example = 3
+index_example = 14
 
 
 fig = plt.figure()
@@ -35,7 +35,7 @@ constraint = constraints.ConvexConstraints(
     qcs=tmp.qcs,
     socs=tmp.socs,
     lmic=tmp.lmic,
-    y0=np.array([[0.5], [0.0], [0.8]]),
+    # y0=np.array([[0.5], [0.0], [0.8]]),
 )
 
 ax = fig.add_subplot(1, 1, 1, projection="3d")
