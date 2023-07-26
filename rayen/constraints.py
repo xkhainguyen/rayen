@@ -452,36 +452,38 @@ class ConvexConstraints:
 
         #############Obtain a strictly feasible point z0
         ###################################################
+        self.y0 = None
+        self.z0 = None
 
-        if y0 is None:
-            epsilon = cp.Variable()
-            z0 = cp.Variable((self.n, 1))
+        # if y0 is None:
+        #     epsilon = cp.Variable()
+        #     z0 = cp.Variable((self.n, 1))
 
-            constraints = self.getConstraintsInSubspaceCvxpy(z0, epsilon)
+        #     constraints = self.getConstraintsInSubspaceCvxpy(z0, epsilon)
 
-            constraints.append(epsilon >= 0)
-            constraints.append(
-                epsilon <= 0.5
-            )  # This constraint is needed for the case where the set is unbounded. Any positive value is valid
+        #     constraints.append(epsilon >= 0)
+        #     constraints.append(
+        #         epsilon <= 0.5
+        #     )  # This constraint is needed for the case where the set is unbounded. Any positive value is valid
 
-            objective = cp.Minimize(-epsilon)
-            prob = cp.Problem(objective, constraints)
+        #     objective = cp.Minimize(-epsilon)
+        #     prob = cp.Problem(objective, constraints)
 
-            result = prob.solve(verbose=False, solver=self.solver)
-            if prob.status != "optimal" and prob.status != "optimal_inaccurate":
-                raise Exception(f"Value is not optimal, prob_status={prob.status}")
+        #     result = prob.solve(verbose=False, solver=self.solver)
+        #     if prob.status != "optimal" and prob.status != "optimal_inaccurate":
+        #         raise Exception(f"Value is not optimal, prob_status={prob.status}")
 
-            utils.verify(
-                epsilon.value > 1e-8
-            )  # If not, there are no strictly feasible points in the subspace
-            # TODO: change hand-coded tolerance
+        #     utils.verify(
+        #         epsilon.value > 1e-8
+        #     )  # If not, there are no strictly feasible points in the subspace
+        #     # TODO: change hand-coded tolerance
 
-            self.z0 = z0.value
-            self.y0 = self.NA_E @ self.z0 + self.yp
+        #     self.z0 = z0.value
+        #     self.y0 = self.NA_E @ self.z0 + self.yp
 
-        else:
-            self.y0 = y0
-            self.z0 = self.NA_E.T @ (self.y0 - self.yp)
+        # else:
+        #     self.y0 = y0
+        #     self.z0 = self.NA_E.T @ (self.y0 - self.yp)
 
         utils.verify(
             np.allclose(NA_E.T @ NA_E, np.eye(NA_E.shape[1]))
