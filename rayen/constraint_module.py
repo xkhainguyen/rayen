@@ -17,11 +17,22 @@ import time
 
 class ConstraintModule(torch.nn.Module):
     def __init__(
-        self, cs, input_dim=None, method="RAYEN", create_map=True, args_DC3=None
+        self,
+        cs,
+        input_dim=None,
+        method="RAYEN",
+        create_map=True,
+        args_DC3=None,
+        offline_phase=False,
     ):
         super().__init__()
 
         self.method = method
+
+        # This will only do online phase to handle non-fixed constraints
+        self.offline_phase = offline_phase
+        if self.offline_phase:
+            self.m = cs.m  # Dimenstion of the constraint input variable x
 
         if self.method == "Bar" and cs.has_quadratic_constraints:
             raise Exception(
@@ -541,20 +552,154 @@ class ConstraintModule(torch.nn.Module):
 
         return kappa
 
+    # TODO
+    # Function to compute z0
+    def solveInteriorPoint(self, x):
+        # Formulate and solve IP problem (update or formulate again?)
+
+        #
+        # if y0 is None:
+        #     epsilon = cp.Variable()
+        #     z0 = cp.Variable((self.n, 1))
+
+        #     constraints = self.getConstraintsInSubspaceCvxpy(z0, epsilon)
+
+        #     constraints.append(epsilon >= 0)
+        #     constraints.append(
+        #         epsilon <= 0.5
+        #     )  # This constraint is needed for the case where the set is unbounded. Any positive value is valid
+
+        #     objective = cp.Minimize(-epsilon)
+        #     prob = cp.Problem(objective, constraints)
+
+        #     result = prob.solve(verbose=False, solver=self.solver)
+        #     if prob.status != "optimal" and prob.status != "optimal_inaccurate":
+        #         raise Exception(f"Value is not optimal, prob_status={prob.status}")
+
+        #     utils.verify(
+        #         epsilon.value > 1e-8
+        #     )  # If not, there are no strictly feasible points in the subspace
+        #     # TODO: change hand-coded tolerance
+
+        #     self.z0 = z0.value
+        #     self.y0 = self.NA_E @ self.z0 + self.yp
+
+        # else:
+        #     self.y0 = y0
+        #     self.z0 = self.NA_E.T @ (self.y0 - self.yp)
+
+        # utils.verify(
+        #     np.allclose(NA_E.T @ NA_E, np.eye(NA_E.shape[1]))
+        # )  # By definition, N'*N=I
+        return True
+
+    # TODO
+    # Function to recompute and register params
+    def updateAndRegisterParams(self, z0):
+        # Precompute for inverse distance to the frontier of Z along v_bar
+        # D = cs.A_p / ((cs.b_p - cs.A_p @ cs.z0) @ np.ones((1, cs.n)))  # for linear
+
+        # all_P, all_q, all_r = utils.getAllPqrFromQcs(cs.qcs)
+        # all_M, all_s, all_c, all_d = utils.getAllMscdFromSocs(cs.socs)
+
+        # if cs.has_lmi_constraints:
+        #     all_F = copy.deepcopy(cs.lmic.all_F)
+        #     H = all_F[-1]
+        #     for i in range(cs.lmic.dim()):
+        #         H += cs.y0[i, 0] * cs.lmic.all_F[i]
+        #     Hinv = np.linalg.inv(H)
+        #     mHinv = -Hinv
+        #     L = np.linalg.cholesky(Hinv)  # Hinv = L @ L^T
+        #     self.register_buffer("mHinv", torch.Tensor(mHinv))
+        #     self.register_buffer("L", torch.Tensor(L))
+
+        # else:
+        #     all_F = []
+
+        # # See https://discuss.pytorch.org/t/model-cuda-does-not-convert-all-variables-to-cuda/114733/9
+        # # and https://discuss.pytorch.org/t/keeping-constant-value-in-module-on-correct-device/10129
+        # self.register_buffer("D", torch.Tensor(D))
+        # self.register_buffer("all_P", torch.Tensor(np.array(all_P)))
+        # self.register_buffer("all_q", torch.Tensor(np.array(all_q)))
+        # self.register_buffer("all_r", torch.Tensor(np.array(all_r)))
+        # self.register_buffer("all_M", torch.Tensor(np.array(all_M)))
+        # self.register_buffer("all_s", torch.Tensor(np.array(all_s)))
+        # self.register_buffer("all_c", torch.Tensor(np.array(all_c)))
+        # self.register_buffer("all_d", torch.Tensor(np.array(all_d)))
+        # # self.register_buffer("all_F", torch.Tensor(np.array(all_F))) #This one dies (probably because out of memory) when all_F contains more than 7000 matrices 500x500 approx
+        # self.register_buffer("all_F", torch.Tensor(all_F))
+        # self.register_buffer("A_p", torch.Tensor(cs.A_p))
+        # self.register_buffer("b_p", torch.Tensor(cs.b_p))
+        # self.register_buffer("yp", torch.Tensor(cs.yp))
+        # self.register_buffer("NA_E", torch.Tensor(cs.NA_E))
+        # self.register_buffer("z0", torch.Tensor(cs.z0))
+        # self.register_buffer("y0", torch.Tensor(cs.y0))
+
+        # Precompute to find roots of quadratic equation
+        # if cs.has_quadratic_constraints:
+        #     all_delta = []
+        #     all_phi = []
+
+        #     for i in range(
+        #         self.all_P.shape[0]
+        #     ):  # for each of the quadratic constraints
+        #         P = self.all_P[i, :, :]
+        #         q = self.all_q[i, :, :]
+        #         r = self.all_r[i, :, :]
+        #         y0 = self.y0
+
+        #         sigma = 2 * (0.5 * y0.T @ P @ y0 + q.T @ y0 + r)
+        #         phi = -(y0.T @ P + q.T) / sigma
+        #         delta = (
+        #             (y0.T @ P + q.T).T @ (y0.T @ P + q.T)
+        #             - 4 * (0.5 * y0.T @ P @ y0 + q.T @ y0 + r) * 0.5 * P
+        #         ) / torch.square(sigma)
+
+        #         all_delta.append(delta)
+        #         all_phi.append(phi)
+
+        #     all_delta = torch.stack(all_delta)
+        #     all_phi = torch.stack(all_phi)
+
+        #     self.register_buffer("all_delta", all_delta)
+        #     self.register_buffer("all_phi", all_phi)
+
+        return True
+
+    # TODO
+    # Forward pass for RAYEN
+    def forwardForRAYEN(self, q):
+        # nn.Module forward method only accepts a single input tensor
+        v = q[:, 0 : self.n, 0:1]
+
+        # if not self.offline_phase:
+        #     x = q[:, self.n : self.n + self.m, 0:1]  # x in Rm is part of the input tensor
+
+        #     # Update current constraint set based on input x, update Ap, bp, NA_E
+        #     self.cs.updateConstraintSet(x)
+
+        #     # Check current y0 if it is still interior point
+        #     if self.cs.isInteriorPoint(self.y0):
+        #           # Just update z0 and related linear params
+        #     else:
+        #           # Solve interior point
+        #           self.z0 = self.solveInteriorPoint(x)
+
+        #           # Update and register all necessary parameters as below
+        #           self.updateAndRegisterParams()
+
+        v_bar = torch.nn.functional.normalize(v, dim=1)
+        kappa = self.computeKappa(v_bar)
+        norm_v = torch.linalg.vector_norm(v, dim=(1, 2), keepdim=True)
+        alpha = torch.minimum(1 / kappa, norm_v)
+        return self.getyFromz(self.z0 + alpha * v_bar)
+
     def forwardForRAYENOld(self, q):
         v = q[:, 0 : self.n, 0:1]
         v_bar = torch.nn.functional.normalize(v, dim=1)
         kappa = self.computeKappa(v_bar)
         beta = q[:, self.n : (self.n + 1), 0:1]
         alpha = 1 / (torch.exp(beta) + kappa)
-        return self.getyFromz(self.z0 + alpha * v_bar)
-
-    def forwardForRAYEN(self, q):
-        v = q[:, 0 : self.n, 0:1]
-        v_bar = torch.nn.functional.normalize(v, dim=1)
-        kappa = self.computeKappa(v_bar)
-        norm_v = torch.linalg.vector_norm(v, dim=(1, 2), keepdim=True)
-        alpha = torch.minimum(1 / kappa, norm_v)
         return self.getyFromz(self.z0 + alpha * v_bar)
 
     def forwardForUU(self, q):
