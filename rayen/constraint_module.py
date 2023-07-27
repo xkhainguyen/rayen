@@ -18,276 +18,40 @@ import time
 class ConstraintModule(torch.nn.Module):
     def __init__(
         self,
-        cs,
-        input_dim=None,
+        xv_dim=None,
+        xc_dim=None,
+        y_dim=None,
         method="RAYEN",
-        create_map=True,
         args_DC3=None,
     ):
         super().__init__()
 
         self.method = method
+        self.m = xv_dim  # Dimension of the step input vector xv
+        self.d = xc_dim  # Dimension of the constraint input vector xc
+        self.k = y_dim  # Dimension of the ambient space (output)
+        self.n = None  # Dimension of the embedded space (determined later)
+        self.batch_size = None
 
-        if self.method == "Bar" and cs.has_quadratic_constraints:
-            raise Exception(
-                f"Method {self.method} cannot be used with quadratic constraints"
-            )
+        self.has_linear_ineq_constraints = 1
+        self.has_linear_eq_constraints = 1
+        self.has_linear_constraints = (
+            self.has_linear_eq_constraints or self.has_linear_ineq_constraints
+        )
+        self.has_quadratic_constraints = 0
+        self.has_soc_constraints = 0
+        self.has_lmi_constraints = 0
 
-        if self.method == "DC3" and (cs.has_soc_constraints or cs.has_lmi_constraints):
-            raise NotImplementedError
-
-        if self.method == "DC3":
-            utils.verify(args_DC3 is not None)
-            self.args_DC3 = args_DC3
-
-        self.cs = cs
-        self.k = cs.k  # Dimension of the ambient space
-        self.n = cs.n  # Dimension of the embedded space
-
-        # Precompute for inverse distance to the frontier of Z along v_bar
-        if cs.z0 is not None:
-            print("\ncs.z0 is not None\n")
-            D = cs.A_p / ((cs.b_p - cs.A_p @ cs.z0) @ np.ones((1, cs.n)))  # for linear
-
-            all_P, all_q, all_r = utils.getAllPqrFromQcs(cs.qcs)
-            all_M, all_s, all_c, all_d = utils.getAllMscdFromSocs(cs.socs)
-
-            if cs.has_lmi_constraints:
-                all_F = copy.deepcopy(cs.lmic.all_F)
-                H = all_F[-1]
-                for i in range(cs.lmic.dim()):
-                    H += cs.y0[i, 0] * cs.lmic.all_F[i]
-                Hinv = np.linalg.inv(H)
-                mHinv = -Hinv
-                L = np.linalg.cholesky(Hinv)  # Hinv = L @ L^T
-                self.register_buffer("mHinv", torch.Tensor(mHinv))
-                self.register_buffer("L", torch.Tensor(L))
-
-            else:
-                all_F = []
-
-            # See https://discuss.pytorch.org/t/model-cuda-does-not-convert-all-variables-to-cuda/114733/9
-            # and https://discuss.pytorch.org/t/keeping-constant-value-in-module-on-correct-device/10129
-            self.register_buffer("D", torch.Tensor(D))
-            self.register_buffer("all_P", torch.Tensor(np.array(all_P)))
-            self.register_buffer("all_q", torch.Tensor(np.array(all_q)))
-            self.register_buffer("all_r", torch.Tensor(np.array(all_r)))
-            self.register_buffer("all_M", torch.Tensor(np.array(all_M)))
-            self.register_buffer("all_s", torch.Tensor(np.array(all_s)))
-            self.register_buffer("all_c", torch.Tensor(np.array(all_c)))
-            self.register_buffer("all_d", torch.Tensor(np.array(all_d)))
-            # self.register_buffer("all_F", torch.Tensor(np.array(all_F))) #This one dies (probably because out of memory) when all_F contains more than 7000 matrices 500x500 approx
-            self.register_buffer("all_F", torch.Tensor(all_F))
-            self.register_buffer("A_p", torch.Tensor(cs.A_p))
-            self.register_buffer("b_p", torch.Tensor(cs.b_p))
-            self.register_buffer("yp", torch.Tensor(cs.yp))
-            self.register_buffer("NA_E", torch.Tensor(cs.NA_E))
-            self.register_buffer("z0", torch.Tensor(cs.z0))
-            self.register_buffer("y0", torch.Tensor(cs.y0))
-
-        if self.method == "PP" or self.method == "UP":
-            # Section 8.1.1 of https://web.stanford.edu/~boyd/cvxbook/bv_cvxbook.pdf
-            self.z_projected = cp.Variable((self.n, 1))  # projected point
-            self.z_to_be_projected = cp.Parameter((self.n, 1))  # original point
-            constraints = self.cs.getConstraintsInSubspaceCvxpy(self.z_projected)
-
-            # First option.
-            objective = cp.Minimize(
-                cp.sum_squares(self.z_projected - self.z_to_be_projected)
-            )
-
-            # Second option. Sometimes this may be preferred because of this: http://cvxr.com/cvx/doc/advanced.html#eliminating-quadratic-forms This may solve cases of ("Solver ecos returned status Infeasible" or "Solver SCS returned status Infeasible")
-            # objective = cp.Minimize(cp.norm(self.z_projected - self.z_to_be_projected))
-
-            self.prob_projection = cp.Problem(objective, constraints)
-
-            assert self.prob_projection.is_dpp()
-            self.proj_layer = CvxpyLayer(
-                self.prob_projection,
-                parameters=[self.z_to_be_projected],
-                variables=[self.z_projected],
-            )
-
-            if self.cs.has_lmi_constraints:
-                self.solver_projection = (
-                    "SCS"  # slower, less accurate, supports LMI constraints
-                )
-            else:
-                self.solver_projection = (
-                    "ECOS"  # fast, accurate, does not support LMI constraints
-                )
+        self.selectSolver()
 
         if self.method == "RAYEN" or self.method == "RAYEN_old":
-            # TODO
-            self.m = cs.m  # Dimenstion of the constraint input variable x
-
-            # This will only do online phase to handle non-fixed constraints
-            self.ip_online = True if self.m > 0 else False
-            # if self.ip_online:
-            self.setupInteriorPointLayer()
-
-            # Precompute to find roots of quadratic equation
-            if cs.z0 is not None:
-                if cs.has_quadratic_constraints:
-                    all_delta = []
-                    all_phi = []
-
-                    for i in range(
-                        self.all_P.shape[0]
-                    ):  # for each of the quadratic constraints
-                        P = self.all_P[i, :, :]
-                        q = self.all_q[i, :, :]
-                        r = self.all_r[i, :, :]
-                        y0 = self.y0
-
-                        sigma = 2 * (0.5 * y0.T @ P @ y0 + q.T @ y0 + r)
-                        phi = -(y0.T @ P + q.T) / sigma
-                        delta = (
-                            (y0.T @ P + q.T).T @ (y0.T @ P + q.T)
-                            - 4 * (0.5 * y0.T @ P @ y0 + q.T @ y0 + r) * 0.5 * P
-                        ) / torch.square(sigma)
-
-                        all_delta.append(delta)
-                        all_phi.append(phi)
-
-                    all_delta = torch.stack(all_delta)
-                    all_phi = torch.stack(all_phi)
-
-                    self.register_buffer("all_delta", all_delta)
-                    self.register_buffer("all_phi", all_phi)
-
-        if self.method == "Bar":
-            print("Computing vertices and rays...")
-            V, R = utils.H_to_V(cs.A_p, cs.b_p)
-            self.register_buffer("V", torch.Tensor(V))
-            self.register_buffer("R", torch.Tensor(R))
-            self.num_vertices = self.V.shape[1]
-            self.num_rays = self.R.shape[1]
-            assert (self.num_vertices + self.num_rays) > 0
-            print(f"Found {self.num_vertices} vertices and {self.num_rays} rays")
-
-        if self.method == "DC3":
-            A2_DC3, b2_DC3 = utils.removeRedundantEquationsFromEqualitySystem(
-                cs.A_E, cs.b_E
-            )
-
-            self.register_buffer("A2_DC3", torch.Tensor(A2_DC3))
-            self.register_buffer("b2_DC3", torch.Tensor(b2_DC3))
-            self.register_buffer("A1_DC3", torch.Tensor(cs.A_I))
-            self.register_buffer("b1_DC3", torch.Tensor(cs.b_I))
-
-            # Constraints are now
-            # A2_DC3 y = b2_DC3
-            # A1_DC3 y <= b1_DC3
-
-            self.neq_DC3 = self.A2_DC3.shape[0]
-
-            #################################### Find partial_vars and other_vars
-
-            if A2_DC3.shape[0] == 0:  # There are no equality constraints
-                self.partial_vars = np.arange(self.k)
-                self.other_vars = np.setdiff1d(np.arange(self.k), self.partial_vars)
+            # Handle dimensions of ambient and embedded space
+            if self.has_linear_eq_constraints:
+                self.n = self.k - 1  # Just one linear equality constraint
             else:
-                # This is a more efficient way to do https://github.com/locuslab/DC3/blob/35437af7f22390e4ed032d9eef90cc525764d26f/utils.py#L67
-                # Here, we follow  https://stackoverflow.com/a/27907936
-                (A2_DC3_rref, pivots_pos, row_exchanges) = utils.rref(A2_DC3)
-                self.other_vars = [i[1] for i in pivots_pos]
-                self.partial_vars = np.setdiff1d(np.arange(self.k), self.other_vars)
+                self.n = self.k
 
-            #######################################################
-
-            A2p = self.A2_DC3[:, self.partial_vars]
-            A2o = self.A2_DC3[:, self.other_vars]
-
-            # assert np.linalg.matrix_rank(A2_DC3) == np.linalg.matrix_rank(A2o) == A2o.shape[-1]
-
-            A2oi = torch.inverse(A2o)
-
-            ####################################################
-            ####################################################
-
-            A1p = self.A1_DC3[:, self.partial_vars]
-            A1o = self.A1_DC3[:, self.other_vars]
-
-            A1_effective = A1p - A1o @ (A2oi @ A2p)
-            b1_effective = self.b1_DC3 - A1o @ A2oi @ self.b2_DC3
-
-            all_P_effective = torch.Tensor(
-                self.all_P.shape[0], len(self.partial_vars), len(self.partial_vars)
-            )
-            all_q_effective = torch.Tensor(
-                self.all_q.shape[0], len(self.partial_vars), 1
-            )
-            all_r_effective = torch.Tensor(self.all_q.shape[0], 1, 1)
-
-            self.register_buffer("A2oi", A2oi)
-            self.register_buffer("A2p", A2p)
-            self.register_buffer("A1_effective", A1_effective)
-            self.register_buffer("b1_effective", b1_effective)
-
-            ####################
-            for i in range(
-                self.all_P.shape[0]
-            ):  # for each of the quadratic constraints
-                P = self.all_P[i, :, :]
-                q = self.all_q[i, :, :]
-                r = self.all_r[i, :, :]
-
-                Po = P[np.ix_(self.other_vars, self.other_vars)].view(
-                    len(self.other_vars), len(self.other_vars)
-                )
-                Pp = P[np.ix_(self.partial_vars, self.partial_vars)].view(
-                    len(self.partial_vars), len(self.partial_vars)
-                )
-                Pop = P[np.ix_(self.other_vars, self.partial_vars)].view(
-                    len(self.other_vars), len(self.partial_vars)
-                )
-
-                qo = q[self.other_vars, 0:1]
-                qp = q[self.partial_vars, 0:1]
-
-                b2 = self.b2_DC3
-
-                P_effective = 2 * (
-                    -A2p.T @ A2oi.T @ Pop
-                    + 0.5 * A2p.T @ A2oi.T @ Po @ A2oi @ A2p
-                    + 0.5 * Pp
-                )
-                q_effective = (
-                    b2.T @ A2oi.T @ Pop
-                    + qp.T
-                    - qo.T @ A2oi @ A2p
-                    - b2.T @ A2oi.T @ Po @ A2oi @ A2p
-                ).T
-                r_effective = (
-                    qo.T @ A2oi @ b2 + 0.5 * b2.T @ A2oi.T @ Po @ A2oi @ b2 + r
-                )
-
-                ###### QUICK CHECK
-                # tmp=random.randint(1, 100) #number of elements in the batch
-                # yp=torch.rand(tmp, len(self.partial_vars), 1)
-
-                # y = torch.zeros((tmp, self.k, 1))
-                # y[:, self.partial_vars, :] = yp
-                # y[:, self.other_vars, :] = self.obtainyoFromypDC3(yp)
-
-                # using_effective=utils.quadExpression(yp, P_effective, q_effective, r_effective)
-                # using_original=utils.quadExpression(y, P, q, r)
-
-                # assert torch.allclose(using_effective, using_original, atol=1e-05)
-
-                ###################
-
-                all_P_effective[i, :, :] = P_effective
-                all_q_effective[i, :, :] = q_effective
-                all_r_effective[i, :, :] = r_effective
-
-            self.register_buffer("all_P_effective", all_P_effective)
-            self.register_buffer("all_q_effective", all_q_effective)
-            self.register_buffer("all_r_effective", all_r_effective)
-
-            ####################################################
-            ####################################################
+            create_step_input_map = True if self.n != self.m else False
 
         if self.method == "RAYEN_old":
             self.forwardForMethod = self.forwardForRAYENOld
@@ -314,110 +78,27 @@ class ConstraintModule(torch.nn.Module):
         else:
             raise NotImplementedError
 
-        if create_map:
-            utils.verify(input_dim is not None, "input_dim needs to be provided")
-            self.mapper = nn.Linear(input_dim, self.dim_after_map)
+        if create_step_input_map:
+            self.stepInputMap = nn.Linear(self.m, self.n)
         else:
-            self.mapper = nn.Sequential()
+            self.stepInputMap = nn.Sequential()
+
+    def selectSolver(self):
+        installed_solvers = cp.installed_solvers()
+        if ("GUROBI" in installed_solvers) and self.has_lmi_constraints == False:
+            self.solver = "GUROBI"  # You need to do `python -m pip install gurobipy`
+        elif ("ECOS" in installed_solvers) and self.has_lmi_constraints == False:
+            self.solver = "ECOS"
+        elif "SCS" in installed_solvers:
+            self.solver = "SCS"
+        # elif 'OSQP' in installed_solvers:
+        # 	self.solver='OSQP'
+        # elif 'CVXOPT' in installed_solvers:
+        # 	self.solver='CVXOPT'
+        else:
+            # TODO: There are more solvers, see https://www.cvxpy.org/tutorial/advanced/index.html#choosing-a-solver
+            raise Exception(f"Which solver do you have installed?")
             # Mapper does nothing
-
-    # Constraint Completion in DC3, obtaining y_other from y_partial
-    def obtainyoFromypDC3(self, yp):
-        return self.A2oi @ (self.b2_DC3 - self.A2p @ yp)
-
-    def forwardForDC3(self, q):
-        #### Complete partial
-        y = torch.zeros((q.shape[0], self.k, 1), device=q.device)
-        y[:, self.partial_vars, :] = q
-        y[:, self.other_vars, :] = self.obtainyoFromypDC3(q)
-
-        #### Grad steps all
-
-        y_new = y
-        step_index = 0
-        old_y_step = 0
-
-        if self.training:
-            max_steps = self.args_DC3[
-                "max_steps_training"
-            ]  # This is called corrTrainSteps in DC3 original code
-        else:
-            max_steps = self.args_DC3[
-                "max_steps_testing"
-            ]  # float("inf") #This is called corrTestMaxSteps in DC3 original code
-
-        while True:
-            ################################################
-            ################################################ COMPUTE y_step
-
-            yp = y_new[:, self.partial_vars, :]
-            ypT = torch.transpose(yp, 1, 2)
-
-            grad = (
-                2
-                * self.A1_effective.T
-                @ torch.relu(self.A1_effective @ yp - self.b1_effective)
-            )
-
-            for i in range(
-                self.all_P_effective.shape[0]
-            ):  # for each of the quadratic constraints
-                P_effective = self.all_P_effective[i, :, :]
-                q_effective = self.all_q_effective[i, :, :]
-                r_effective = self.all_r_effective[i, :, :]
-
-                tmp1 = P_effective @ yp + q_effective
-                tmp2 = torch.relu(
-                    utils.quadExpression(yp, P_effective, q_effective, r_effective)
-                )
-
-                grad += 2 * tmp1 @ tmp2  # The 2 is because of the squared norm
-
-            y_step = torch.zeros_like(y)
-            y_step[:, self.partial_vars, :] = grad
-            y_step[:, self.other_vars, :] = -self.A2oi @ self.A2p @ grad
-            ################################################
-            ################################################
-
-            new_y_step = (
-                self.args_DC3["lr"] * y_step + self.args_DC3["momentum"] * old_y_step
-            )
-            y_new = y_new - new_y_step
-            old_y_step = new_y_step
-            step_index += 1
-
-            ################################################
-            ################################################ COMPUTE current violation
-            stacked = self.A1_DC3 @ y_new - self.b1_DC3
-            for i in range(
-                self.all_P.shape[0]
-            ):  # for each of the quadratic constraints
-                stacked = torch.cat(
-                    (
-                        stacked,
-                        utils.quadExpression(
-                            y_new,
-                            self.all_P[i, :, :],
-                            self.all_q[i, :, :],
-                            self.all_r[i, :, :],
-                        ),
-                    ),
-                    dim=1,
-                )
-            violation = torch.max(torch.relu(stacked))
-            ################################################
-            ################################################
-
-            converged_ineq = violation < self.args_DC3["eps_converge"]
-            max_iter_reached = step_index >= max_steps
-
-            if max_iter_reached:
-                break
-
-            if converged_ineq:
-                break
-
-        return y_new
 
     def solveSecondOrderEq(self, a, b, c, is_quad_constraint):
         discriminant = torch.square(b) - 4 * (a) * (c)
@@ -640,12 +321,93 @@ class ConstraintModule(torch.nn.Module):
         return True
 
     # TODO
+    # Problem-specific map from single example x to constraint data
+    def constraintInputMap(x):
+        # x is a rank-2 tensor
+        # outputs are rank-2 tensors
+        A1 = torch.tensor(
+            [
+                [1.0, 0, 0],
+                [0, 1.0, 0],
+                [0, 0, 1.0],
+                [-1.0, 0, 0],
+                [0, -1.0, 0],
+                [0, 0, -1.0],
+            ]
+        )
+        b1 = torch.tensor([[1.0], [1.0], [1.0], [0], [0], [0]])
+        A2 = torch.tensor([[1.0, 1.0, 1.0]])
+        b2 = x[0, 0:1].unsqueeze(dim=1)
+        return A1, b1, A2, b2  # ASK do I need to move it to device?
+
+    # TODO
+    # From constraint input batch X, update all constraint data batch
+    def updateSubspaceConstraints(self, cs_dict):
+        # Retrive data from cs_dict
+        A1 = cs_dict["A1"]
+        b1 = cs_dict["b1"]
+        A2 = cs_dict["A1"]
+        b2 = cs_dict["b1"]
+
+        # Stack the matrices so that the linear constraints look like Ax<=b
+        has_linear_ineq_constraints = 1
+        if has_linear_ineq_constraints:
+            A = A1
+            b = b1
+            has_linear_eq_constraints = 1
+            if has_linear_eq_constraints:
+                # Add the equality constraints as inequality constraints
+                A = torch.cat((A, A2, -A2), axis=1)
+                b = torch.cat((b, b2, -b2), axis=1)
+        else:
+            # Add the equality constraints as inequality constraints
+            A = torch.cat((A, A2, -A2), axis=1)
+            b = torch.cat((b, b2, -b2), axis=1)
+
+        print_debug_info = 1
+        if print_debug_info:
+            utils.printInBoldGreen(f"A is {A.shape} and b is {b.shape}")
+
+        # Here we simply choose E such that
+        # A_E == A2, b_E == b_2
+        # A_I == A1, b_I == b_1
+        if self.has_linear_ineq_constraints:
+            start = self.A1.shape[1]
+        else:
+            start = 0
+        E = list(range(start, A.shape[1]))
+
+        if print_debug_info:
+            utils.printInBoldGreen(f"E={E}")
+
+        I = [i for i in range(A.shape[1]) if i not in E]
+
+        # Obtain A_E, b_E and A_I, b_I
+        if len(E) > 0:
+            A_E = A[:, E, :]
+            b_E = b[:, E, :]
+        else:
+            A_E = torch.zeros(self.batch_size, 1, A.shape[2])
+            b_E = torch.zeros(self.batch_size, 1, 1)
+
+        if len(I) > 0:
+            A_I = A[:, I, :]
+            b_I = b[:, I, :]
+        else:
+            A_I = torch.zeros(self.batch_size, 1, A.shape[2])
+            # 0z<=1
+            b_I = torch.ones(self.batch_size, 1, 1)
+
+        return True
+
+    # TODO
     # Setup interior point problem beforehand
     def setupInteriorPointLayer(self):
         self.ip_epsilon = cp.Variable()
         self.ip_z0 = cp.Variable((self.n, 1))
-        # self.ip_constraints = cp.Parameter((1, 1))  # original point ???
-        self.params = cp.Parameter((1, 1))
+
+        # self.ip_constraints = cp.Parameter((X, 1))  # need size
+        self.params = cp.Parameter((1, 1))  # temp
         self.ip_constraints = self.cs.getConstraintsInSubspaceCvxpy(
             self.ip_z0, self.ip_epsilon
         )
@@ -677,8 +439,6 @@ class ConstraintModule(torch.nn.Module):
         # self.ip_constraints = self.cs.getConstraintsInSubspaceCvxpy(
         #     self.ip_z0, self.ip_epsilon
         # )
-        # self.ip_prob.solve(verbose=False, solver=self.ip_solver)
-        # ip_z0 = self.ip_z0.value
 
         (ip_z0,) = self.ip_layer(
             torch.zeros(1, 1, 1),
@@ -696,112 +456,47 @@ class ConstraintModule(torch.nn.Module):
 
     # TODO
     # Forward pass for RAYEN
-    def forwardForRAYEN(self, q):
-        # nn.Module forward method only accepts a single input tensor
-        v = q[:, 0 : self.n, 0:1]
+    def forwardForRAYEN(self, v, cs_dict):
+        # Update Ap, bp, NA_E
+        self.updateSubspaceConstraints(cs_dict)  # torch!!
 
-        # if self.ip_online:
-        #     print("Online Interior Point")
-        #     x = q[
-        #         :, self.n : self.n + self.m, 0:1
-        #     ]  # x in Rm is part of the input tensor
+        # # Solve interior point
+        # self.z0 = self.solveInteriorPoint()
 
-        #     # Update current constraint set based on input x, update Ap, bp, NA_E
-        #     self.cs.updateConstraintSet(x)
+        # # Update and register all necessary parameters
+        # self.updateParams()
 
-        #     # Check current y0 if it is still interior point
-        #     if self.cs.isInteriorPoint(self.cs.y0):
-        #         # Just update z0 and related linear params
-        #         pass
-        #     else:
-        #         # Solve interior point
-        #         self.z0 = self.solveInteriorPoint()
-        #         # Update and register all necessary parameters
-        #         self.updateAndRegisterParams()
-
-        if self.cs.z0 is None:
-            print("Online Interior Point")
-
-            # Obtain new interior point
-            self.z0 = self.solveInteriorPoint()[0]
-
-            # Update related params
-            self.updateAndRegisterParams()
-
-        v_bar = torch.nn.functional.normalize(v, dim=1)
-        kappa = self.computeKappa(v_bar)
-        norm_v = torch.linalg.vector_norm(v, dim=(1, 2), keepdim=True)
-        alpha = torch.minimum(1 / kappa, norm_v)
-        return self.getyFromz(self.z0 + alpha * v_bar)
-
-    def forwardForRAYENOld(self, q):
-        v = q[:, 0 : self.n, 0:1]
-        v_bar = torch.nn.functional.normalize(v, dim=1)
-        kappa = self.computeKappa(v_bar)
-        beta = q[:, self.n : (self.n + 1), 0:1]
-        alpha = 1 / (torch.exp(beta) + kappa)
-        return self.getyFromz(self.z0 + alpha * v_bar)
-
-    def forwardForUU(self, q):
-        return q
-
-    def forwardForBar(self, q):
-        tmp1 = q[:, 0 : self.num_vertices, 0:1]  # 0:1 to keep the dimension.
-        tmp2 = q[
-            :, self.num_vertices : (self.num_vertices + self.num_rays), 0:1
-        ]  # 0:1 to keep the dimension.
-
-        lambdas = nn.functional.softmax(tmp1, dim=1)
-        mus = torch.abs(tmp2)
-
-        return self.getyFromz(self.V @ lambdas + self.R @ mus)
-
-    def project(self, q):
-        # If you use ECOS, you can set solver_args={'eps': 1e-6} (or smaller) for better solutions, see https://github.com/cvxpy/cvxpy/issues/880#issuecomment-557278620
-        (z,) = self.proj_layer(
-            q, solver_args={"solve_method": self.solver_projection}
-        )  # "max_iters": 10000
-        return z
-
-    def forwardForPP(self, q):
-        z = self.project(q)
-        return self.getyFromz(z)
-
-    def forwardForUP(self, q):
-        if self.training == False:
-            z = self.project(q)
-        else:
-            z = q
-
-        return self.getyFromz(z)
-
-    def getDimAfterMap(self):
-        return self.dim_after_map
-
-    def gety0(self):
-        return self.getyFromz(self.z0)
-
-    def getyFromz(self, z):
-        y = self.NA_E @ z + self.yp
-        return y
-
-    def getzFromy(self, y):
-        z = self.NA_E.T @ (y - self.yp)
-        return z
+        # v_bar = torch.nn.functional.normalize(v, dim=1)
+        # kappa = self.computeKappa(v_bar)
+        # norm_v = torch.linalg.vector_norm(v, dim=(1, 2), keepdim=True)
+        # alpha = torch.minimum(1 / kappa, norm_v)
+        # return self.getyFromz(self.z0 + alpha * v_bar)
+        return True
 
     def forward(self, x):
         ##################  MAPPER LAYER ####################
+        # nn.Module forward method only accepts a single input tensor
         # nsib denotes the number of samples in the batch
-        # x has dimensions [nsib, numel_input_mapper, 1]. nsib is the number of samples in the batch (i.e., x.shape[0]=x.shape[0])
-        q = self.mapper(
-            x.view(x.size(0), -1)
+        # each sample includes xv (size m) and xc (size d)
+        # x has dimensions [nsib, m + d, 1]
+        self.batch_size = x.shape[0]
+        xv = x[:, 0 : self.m, 0:1]  # After this, xv has dim [nsib, m, 1]
+        xc = x[:, 0 : self.m + self.d, 0:1]  # After this, xv has dim [nsib, d, 1]
+
+        # TODO Refactor this into sth cleaner
+        v = self.stepInputMap(
+            xv.view(xv.size(0), -1)
         )  # After this, q has dimensions [nsib, numel_output_mapper]
-        q = torch.unsqueeze(
-            q, dim=2
+        v = torch.unsqueeze(
+            v, dim=2
         )  # After this, q has dimensions [nsib, numel_output_mapper, 1]
+
+        # TODO Refactor this into a class of ConvexConstraints
+        self.A1, self.b1, self.A2, self.b2 = torch.vmap(self.constraintInputMap)(xc)
+        cs_dict = {"A1": self.A1, "b1": self.b1, "A2": self.A2, "b2": self.b2}
         ####################################################
 
-        y = self.forwardForMethod(q)
+        y = self.forwardForMethod(v, cs_dict)
 
         assert (
             torch.isnan(y).any()

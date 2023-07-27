@@ -22,7 +22,7 @@ import fixpath  # Following this example: https://github.com/tartley/colorama/bl
 from rayen import constraints, constraint_module, utils
 
 method = "RAYEN"
-index_example = 14
+index_example = 13
 
 
 fig = plt.figure()
