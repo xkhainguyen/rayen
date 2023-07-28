@@ -49,17 +49,17 @@ xv_batched = torch.cat((xv_batched_x, xv_batched_y, xv_batched_z), 1)
 xc_batched = torch.Tensor(num_samples, 1, 1).uniform_(-2.5, 2.5)
 x_batched = torch.cat((xv_batched, xc_batched), 1)
 
-print(xv_batched)
-print(xc_batched)
-print(x_batched)
+# print(xv_batched)
+# print(xc_batched)
+# print(x_batched)
 
-# my_layer.eval()  # This changes the self.training variable of the module
+my_layer.eval()  # This changes the self.training variable of the module
 
-# time_start = time.time()
-# result = my_layer(v_batched)
-# total_time_per_sample = (time.time() - time_start) / num_samples
+time_start = time.time()
+result = my_layer(x_batched)
+total_time_per_sample = (time.time() - time_start) / num_samples
 
-# result = result.detach().numpy()
+result = result.detach().numpy()
 
 # y0 = my_layer.gety0()
 # print(y0)

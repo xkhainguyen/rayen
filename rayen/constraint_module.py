@@ -53,6 +53,8 @@ class ConstraintModule(torch.nn.Module):
 
             create_step_input_map = True if self.n != self.m else False
 
+            self.setupInteriorPointLayer()
+
         if self.method == "RAYEN_old":
             self.forwardForMethod = self.forwardForRAYENOld
             self.dim_after_map = self.n + 1
@@ -99,6 +101,8 @@ class ConstraintModule(torch.nn.Module):
             # TODO: There are more solvers, see https://www.cvxpy.org/tutorial/advanced/index.html#choosing-a-solver
             raise Exception(f"Which solver do you have installed?")
             # Mapper does nothing
+        self.solver = "SCS"
+        return True
 
     def solveSecondOrderEq(self, a, b, c, is_quad_constraint):
         discriminant = torch.square(b) - 4 * (a) * (c)
@@ -321,84 +325,131 @@ class ConstraintModule(torch.nn.Module):
         return True
 
     # TODO
-    # Problem-specific map from single example x to constraint data
-    def constraintInputMap(x):
-        # x is a rank-2 tensor
-        # outputs are rank-2 tensors
-        A1 = torch.tensor(
-            [
-                [1.0, 0, 0],
-                [0, 1.0, 0],
-                [0, 0, 1.0],
-                [-1.0, 0, 0],
-                [0, -1.0, 0],
-                [0, 0, -1.0],
-            ]
-        )
-        b1 = torch.tensor([[1.0], [1.0], [1.0], [0], [0], [0]])
-        A2 = torch.tensor([[1.0, 1.0, 1.0]])
-        b2 = x[0, 0:1].unsqueeze(dim=1)
-        return A1, b1, A2, b2  # ASK do I need to move it to device?
-
-    # TODO
     # From constraint input batch X, update all constraint data batch
     def updateSubspaceConstraints(self, cs_dict):
-        # Retrive data from cs_dict
-        A1 = cs_dict["A1"]
-        b1 = cs_dict["b1"]
-        A2 = cs_dict["A1"]
-        b2 = cs_dict["b1"]
+        if self.has_linear_constraints:
+            # Retrive data from cs_dict
+            A1 = cs_dict["A1"]
+            b1 = cs_dict["b1"]
+            A2 = cs_dict["A2"]
+            b2 = cs_dict["b2"]
 
-        # Stack the matrices so that the linear constraints look like Ax<=b
-        has_linear_ineq_constraints = 1
-        if has_linear_ineq_constraints:
-            A = A1
-            b = b1
-            has_linear_eq_constraints = 1
-            if has_linear_eq_constraints:
+            # print(A1)
+            # print(A2)
+            # Stack the matrices so that the linear constraints look like Ax<=b
+            if self.has_linear_ineq_constraints:
+                A = A1
+                b = b1
+                if self.has_linear_eq_constraints:
+                    # Add the equality constraints as inequality constraints
+                    A = torch.cat((A, A2, -A2), axis=1)
+                    b = torch.cat((b, b2, -b2), axis=1)
+            else:
                 # Add the equality constraints as inequality constraints
                 A = torch.cat((A, A2, -A2), axis=1)
                 b = torch.cat((b, b2, -b2), axis=1)
+
+            print_debug_info = 1
+            if print_debug_info:
+                utils.printInBoldGreen(f"A is {A.shape} and b is {b.shape}")
+
+            # TODO Preprocess
+            # Here we simply choose E such that
+            # A_E == A2, b_E == b_2
+            # A_I == A1, b_I == b_1
+            if self.has_linear_ineq_constraints:
+                start = self.A1.shape[1]
+            else:
+                start = 0
+            E = list(range(start, A.shape[1]))
+
+            if print_debug_info:
+                utils.printInBoldGreen(f"E={E}")
+
+            I = [i for i in range(A.shape[1]) if i not in E]
+
+            # Obtain A_E, b_E and A_I, b_I
+            if len(E) > 0:
+                A_E = A[:, E, :]
+                b_E = b[:, E, :]
+            else:
+                A_E = torch.zeros(self.batch_size, 1, A.shape[2])
+                b_E = torch.zeros(self.batch_size, 1, 1)
+
+            if len(I) > 0:
+                A_I = A[:, I, :]
+                b_I = b[:, I, :]
+            else:
+                A_I = torch.zeros(self.batch_size, 1, A.shape[2])
+                # 0z<=1
+                b_I = torch.ones(self.batch_size, 1, 1)
+
+            if print_debug_info:
+                utils.printInBoldGreen(f"AE={A_E}")
+                utils.printInBoldGreen(f"AI={A_I}")
+
+            # At this point, A_E, b_E, A_I, and b_I have at least one row
+
+            # Project into the nullspace of A_E
+            ################################################
+            NA_E = nullSpace(A_E)
+            print(NA_E)
+            # n = NA_E.shape[2]  # dimension of the subspace
+            yp = torch.pinverse(A_E) @ b_E
+            A_p = A_I @ NA_E
+            b_p = b_I - A_I @ yp
+            # print(yp)
+            # print(A_p)
+
+            utils.verify(A_p.ndim == 3, f"A_p.shape={A_p.shape}")
+            utils.verify(b_p.ndim == 3, f"b_p.shape={b_p.shape}")
+            utils.verify(b_p.shape[2] == 1)
+            utils.verify(A_p.shape[1] == b_p.shape[1])
+
+            if print_debug_info:
+                utils.printInBoldGreen(f"A_p is {A_p.shape} and b_p is {b_p.shape}")
+
+            self.n = A_p.shape[2]  # dimension of the linear subspace
+            # print(self.n)
         else:
-            # Add the equality constraints as inequality constraints
-            A = torch.cat((A, A2, -A2), axis=1)
-            b = torch.cat((b, b2, -b2), axis=1)
-
-        print_debug_info = 1
-        if print_debug_info:
-            utils.printInBoldGreen(f"A is {A.shape} and b is {b.shape}")
-
-        # Here we simply choose E such that
-        # A_E == A2, b_E == b_2
-        # A_I == A1, b_I == b_1
-        if self.has_linear_ineq_constraints:
-            start = self.A1.shape[1]
-        else:
-            start = 0
-        E = list(range(start, A.shape[1]))
-
-        if print_debug_info:
-            utils.printInBoldGreen(f"E={E}")
-
-        I = [i for i in range(A.shape[1]) if i not in E]
-
-        # Obtain A_E, b_E and A_I, b_I
-        if len(E) > 0:
-            A_E = A[:, E, :]
-            b_E = b[:, E, :]
-        else:
-            A_E = torch.zeros(self.batch_size, 1, A.shape[2])
-            b_E = torch.zeros(self.batch_size, 1, 1)
-
-        if len(I) > 0:
-            A_I = A[:, I, :]
-            b_I = b[:, I, :]
-        else:
-            A_I = torch.zeros(self.batch_size, 1, A.shape[2])
+            self.n = self.k
+            NA_E = torch.eye(self.n).unsqueeze(0).repeat(self.batch_size, 1, 1)
+            # print(NA_E)
+            yp = torch.zeros(self.batch_size, self.n, 1)
+            # print(yp)
             # 0z<=1
+            A_p = torch.zeros(self.batch_size, 1, self.n)
+            # print(A_p)
+            b_p = torch.ones(self.batch_size, 1, 1)
+            # print(b_p)
+            A_E = torch.zeros(self.batch_size, 1, self.n)
+            # print(A_E)
+            # 0y=0
+            b_E = torch.zeros(self.batch_size, 1, 1)
+            # print(b_E)
+            A_I = torch.zeros(self.batch_size, 1, self.n)
+            # print(A_I)
+            # 0y<=1
             b_I = torch.ones(self.batch_size, 1, 1)
+            # print(b_I)
 
+        self.A_E = A_E
+        self.b_E = b_E
+        self.A_I = A_I
+        self.b_I = b_I
+
+        self.A_p = A_p
+        self.b_p = b_p
+        self.yp = yp
+        self.NA_E = NA_E
+
+        utils.verify(self.n == (self.k - np.linalg.matrix_rank(self.A_E[0])))
         return True
+
+    # TODO
+    def getConstraintsInSubspaceCvxpy(self, z, A_p, b_p, epsilon=0.0):
+        constraints = [A_p @ z - b_p <= -epsilon * torch.ones((A_p.shape[0], 1))]
+        return constraints
 
     # TODO
     # Setup interior point problem beforehand
@@ -407,29 +458,29 @@ class ConstraintModule(torch.nn.Module):
         self.ip_z0 = cp.Variable((self.n, 1))
 
         # self.ip_constraints = cp.Parameter((X, 1))  # need size
-        self.params = cp.Parameter((1, 1))  # temp
-        self.ip_constraints = self.cs.getConstraintsInSubspaceCvxpy(
-            self.ip_z0, self.ip_epsilon
+        A_p = cp.Parameter((6, self.n))
+        b_p = cp.Parameter((6, 1))
+        self.ip_constraints = self.getConstraintsInSubspaceCvxpy(
+            self.ip_z0, A_p, b_p, self.ip_epsilon
         )
         self.ip_constraints.append(self.ip_epsilon >= 0)
         self.ip_constraints.append(
             self.ip_epsilon <= 0.5
         )  # This constraint is needed for the case where the set is unbounded. Any positive value is valid
 
-        objective = cp.Minimize(-self.ip_epsilon + self.params)
+        objective = cp.Minimize(-self.ip_epsilon)
         self.ip_prob = cp.Problem(objective, self.ip_constraints)
 
         assert self.ip_prob.is_dpp()
         self.ip_layer = CvxpyLayer(
             self.ip_prob,
-            parameters=[self.params],
+            parameters=[A_p, b_p],
             variables=[self.ip_z0],
         )
 
-        if self.cs.has_lmi_constraints:
-            self.ip_solver = "SCS"  # slower, less accurate, supports LMI constraints
-        else:
-            self.ip_solver = "ECOS"  # fast, accurate, does not support LMI constraints
+        print_debug_info = 1
+        if print_debug_info:
+            utils.printInBoldBlue("Set up interior point problem")
         return True
 
     # TODO
@@ -439,10 +490,12 @@ class ConstraintModule(torch.nn.Module):
         # self.ip_constraints = self.cs.getConstraintsInSubspaceCvxpy(
         #     self.ip_z0, self.ip_epsilon
         # )
-
+        print(self.A_p)
+        print(self.b_p)
         (ip_z0,) = self.ip_layer(
-            torch.zeros(1, 1, 1),
-            solver_args={"solve_method": self.ip_solver},
+            self.A_p,
+            self.b_p,
+            solver_args={"solve_method": self.solver},
         )  # "max_iters": 10000
 
         # if ip_prob.status != "optimal" and ip_prob.status != "optimal_inaccurate":
@@ -461,7 +514,8 @@ class ConstraintModule(torch.nn.Module):
         self.updateSubspaceConstraints(cs_dict)  # torch!!
 
         # # Solve interior point
-        # self.z0 = self.solveInteriorPoint()
+        self.z0 = self.solveInteriorPoint()
+        print(self.z0)
 
         # # Update and register all necessary parameters
         # self.updateParams()
@@ -481,7 +535,7 @@ class ConstraintModule(torch.nn.Module):
         # x has dimensions [nsib, m + d, 1]
         self.batch_size = x.shape[0]
         xv = x[:, 0 : self.m, 0:1]  # After this, xv has dim [nsib, m, 1]
-        xc = x[:, 0 : self.m + self.d, 0:1]  # After this, xv has dim [nsib, d, 1]
+        xc = x[:, self.m : self.m + self.d, 0:1]  # After this, xv has dim [nsib, d, 1]
 
         # TODO Refactor this into sth cleaner
         v = self.stepInputMap(
@@ -491,8 +545,9 @@ class ConstraintModule(torch.nn.Module):
             v, dim=2
         )  # After this, q has dimensions [nsib, numel_output_mapper, 1]
 
+        print(f"xc = {xc}")
         # TODO Refactor this into a class of ConvexConstraints
-        self.A1, self.b1, self.A2, self.b2 = torch.vmap(self.constraintInputMap)(xc)
+        self.A1, self.b1, self.A2, self.b2 = torch.vmap(constraintInputMap)(xc)
         cs_dict = {"A1": self.A1, "b1": self.b1, "A2": self.A2, "b2": self.b2}
         ####################################################
 
@@ -503,3 +558,31 @@ class ConstraintModule(torch.nn.Module):
         ) == False, f"If you are using DC3, try reducing args_DC3[lr]. Right now it's {self.args_DC3['lr']}"
 
         return y
+
+
+# TODO
+# Problem-specific map from single example x to constraint data
+def constraintInputMap(x):
+    # x is a rank-2 tensor
+    # outputs are rank-2 tensors
+    A1 = torch.tensor(
+        [
+            [1.0, 0, 0],
+            [0, 1.0, 0],
+            [0, 0, 1.0],
+            [-1.0, 0, 0],
+            [0, -1.0, 0],
+            [0, 0, -1.0],
+        ]
+    )
+    b1 = torch.tensor([[1.0], [1.0], [1.0], [0], [0], [0]])
+    A2 = torch.tensor([[1.0, 1.0, 1.0]])
+    b2 = x[0, 0:1].unsqueeze(dim=1)
+    return A1, b1, A2, b2  # ASK do I need to move it to device?
+
+
+def nullSpace(batch_A):
+    A = torch.tensor(
+        [[0.81649658, 0.0], [-0.40824829, -0.70710678], [-0.40824829, 0.70710678]]
+    )
+    return A.unsqueeze(0).repeat(batch_A.shape[0], 1, 1)
