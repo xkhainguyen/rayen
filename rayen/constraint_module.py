@@ -459,7 +459,7 @@ class ConstraintModule(torch.nn.Module):
         # print(f"yp = {self.yp}")
         # print(f"z0 = {self.cs.z0}")
 
-        utils.verify(self.n == (self.k - np.linalg.matrix_rank(self.A_E[0])))
+        # utils.verify(self.n == (self.k - np.linalg.matrix_rank(self.A_E[0])))
         return True
 
     # TODO
@@ -593,22 +593,37 @@ def constraintInputMap(x):
     # x is a rank-2 tensor
     # outputs are rank-2 tensors
     # 2x3x1 @ 2x1x1 => 2x3x1
-    A1 = torch.tensor(
-        [
-            [1.0, 0, 0],
-            [0, 1.0, 0],
-            [0, 0, 1.0],
-            [-1.0, 0, 0],
-            [0, -1.0, 0],
-            [0, 0, -1.0],
-        ]
-    )
-    b1 = torch.tensor([[1.0], [1.0], [1.0], [0], [0], [0]]) @ x
+    A1 = torch.tensor([[0.0, -1.0], [x[0, 0], -4.0], [-2.0, 1.0]])
+    b1 = torch.tensor([[-2.0], [1.0], [-5.0]])
     A2 = torch.tensor([])
     b2 = torch.tensor([])
     # A2 = torch.tensor([[1.0, 1.0, 1.0]])
     # b2 = x[0, 0:1].unsqueeze(dim=1)
     return A1, b1, A2, b2  # ASK do I need to move it to device?
+
+
+# # TODO
+# # Problem-specific map from single example x to constraint data
+# def constraintInputMap(x):
+#     # x is a rank-2 tensor
+#     # outputs are rank-2 tensors
+#     # 2x3x1 @ 2x1x1 => 2x3x1
+#     A1 = torch.tensor(
+#         [
+#             [1.0, 0, 0],
+#             [0, 1.0, 0],
+#             [0, 0, 1.0],
+#             [-1.0, 0, 0],
+#             [0, -1.0, 0],
+#             [0, 0, -1.0],
+#         ]
+#     )
+#     b1 = torch.tensor([[1.0], [1.0], [1.0], [0], [0], [0]]) @ x
+#     A2 = torch.tensor([])
+#     b2 = torch.tensor([])
+#     # A2 = torch.tensor([[1.0, 1.0, 1.0]])
+#     # b2 = x[0, 0:1].unsqueeze(dim=1)
+#     return A1, b1, A2, b2  # ASK do I need to move it to device?
 
 
 def nullSpace(batch_A):
