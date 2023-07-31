@@ -412,7 +412,7 @@ class ConvexConstraints:
             yp = np.linalg.pinv(A_E) @ b_E
             A_p = A_I @ NA_E
             b_p = b_I - A_I @ yp
-
+        
             utils.verify(A_p.ndim == 2, f"A_p.shape={A_p.shape}")
             utils.verify(b_p.ndim == 2, f"b_p.shape={b_p.shape}")
             utils.verify(b_p.shape[1] == 1)

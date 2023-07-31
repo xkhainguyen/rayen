@@ -3,6 +3,12 @@ import math
 import torch
 from scipy.linalg import null_space
 
+torch.set_default_dtype(torch.float64)
+# Set the default device to GPU if available, otherwise use CPU
+device = "cuda" if torch.cuda.is_available() else "cpu"
+torch.set_default_tensor_type(
+    torch.cuda.FloatTensor if device == "cuda" else torch.FloatTensor
+)
 # # Create a batch of matrices (3x3 matrices, batch size 2)
 # batch_size = 2
 # matrix_size = (batch_size, 3, 3)
@@ -94,23 +100,59 @@ from scipy.linalg import null_space
 # A_batch = A.unsqueeze(0).repeat(5, 1, 1)
 # print(A_batch)
 
-batch_size = 2
-n = 3
-NA_E = torch.eye(n).unsqueeze(0).repeat(batch_size, 1, 1)
-print(NA_E)
-yp = torch.zeros(batch_size, n, 1)
+# batch_size = 2
+# n = 3
+# NA_E = torch.eye(n).unsqueeze(0).repeat(batch_size, 1, 1)
+# print(NA_E)
+# yp = torch.zeros(batch_size, n, 1)
+# print(yp)
+# A_p = torch.zeros(batch_size, 1, n)  # 0z<=1
+# print(A_p)
+# b_p = torch.ones(batch_size, 1, 1)
+# print(b_p)
+# A_E = torch.zeros(batch_size, 1, n)
+# print(A_E)
+# # 0y=0
+# b_E = torch.zeros(batch_size, 1, 1)
+# print(b_E)
+# A_I = torch.zeros(batch_size, 1, n)
+# print(A_I)
+# # 0y<=1
+# b_I = torch.ones(batch_size, 1, 1)
+# print(b_I)
+
+A = torch.tensor([[[1.0, 1.0, 1.0]], [[1.0, 1.0, 1.0]]])
+b = torch.tensor([[[1.0]], [[1.0]]])
+A1 = torch.tensor([[1.0, 1.0, 1.0]])
+b1 = torch.tensor([[1.0]])
+print(A)
+print(b)
+print(A.device)
+print(np.linalg.pinv(A[0].cpu()) @ b[0].detach().cpu().numpy())
+# print(torch.pinverse(A, driver="gesvd"))
+# s = torch.linalg.svdvals(A[0])
+# print(s)
+yp = torch.linalg.lstsq(A1, b1).solution
 print(yp)
-A_p = torch.zeros(batch_size, 1, n)  # 0z<=1
-print(A_p)
-b_p = torch.ones(batch_size, 1, 1)
-print(b_p)
-A_E = torch.zeros(batch_size, 1, n)
-print(A_E)
-# 0y=0
-b_E = torch.zeros(batch_size, 1, 1)
-print(b_E)
-A_I = torch.zeros(batch_size, 1, n)
-print(A_I)
-# 0y<=1
-b_I = torch.ones(batch_size, 1, 1)
-print(b_I)
+
+
+def pinv(A):
+    """
+    Return the pseudoinverse of A using the QR decomposition.
+    """
+    Q, R = torch.linalg.qr(A)
+    return R.pinverse() @ (Q.transpose(-1, -2))
+
+
+# print(pinv(A))
+# Create a 2x3 matrix
+# A = torch.tensor([[1, 2, 3.0], [4, 5, 6]])
+
+# # Compute the pseudo-inverse of A
+# A_pinv = torch.pinverse(A)
+
+# print("Original matrix A:")
+# print(A)
+
+# print("\nPseudo-inverse of A:")
+# print(A_pinv)

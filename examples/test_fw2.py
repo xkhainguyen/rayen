@@ -32,7 +32,7 @@ torch.set_default_dtype(torch.float64)
 method = "RAYEN"
 
 fig = plt.figure()
-fig.suptitle(method, fontsize=10)
+fig.suptitle(method, fontsize=14)
 
 # tmp = getExample(index_example)
 
@@ -46,45 +46,59 @@ fig.suptitle(method, fontsize=10)
 
 my_layer = constraint_module.ConstraintModule(3, 1, 3, method=method)
 
-num_samples = 2  # 12000
-xv_batched_x = torch.Tensor(num_samples, 1, 1).uniform_(-2.5, 2.5)
-xv_batched_y = torch.Tensor(num_samples, 1, 1).uniform_(-2.5, 2.5)
-xv_batched_z = torch.Tensor(num_samples, 1, 1).uniform_(-2.5, 2.5)
-xv_batched = torch.cat((xv_batched_x, xv_batched_y, xv_batched_z), 1)
-# print(xv_batched)
-# xv_batched = torch.tensor([[[10.0], [10.0], [10.0]]])
-
-# xc_batched = torch.tensor([[1.0]]).unsqueeze(-1).repeat(num_samples, 1, 1)
-# xc_batched = torch.tensor([[[1.0]]])
-xc_batched = torch.Tensor(num_samples, 1, 1).uniform_(1, 3)
-x_batched = torch.cat((xv_batched, xc_batched), 1)
-
-# print(xv_batched)
-# print(xc_batched)
-# print(x_batched)
-
-my_layer.eval()  # This changes the self.training variable of the module
-
-time_start = time.time()
-result = my_layer(x_batched)
-total_time_per_sample = (time.time() - time_start) / num_samples
-
-result = result.detach().numpy()
-
-y0 = my_layer.gety0()
-
-# print("FINISHED")
-# print(f"y0 = {y0}")
-# print(f"xv = {xv_batched}")
-# print(f"xc = {xc_batched}")
-# print(f"result = {result}")
-
-rows = math.ceil(math.sqrt(num_samples))
+num_cstr_samples = 4
+rows = math.ceil(math.sqrt(num_cstr_samples))
 cols = rows
-for i in range(num_samples):
+
+for i in range(num_cstr_samples):
+    num_samples = 1000  # 12000
+
+    # Define step input tensor
+    xv_batched_x = torch.Tensor(num_samples, 1, 1).uniform_(-2.5, 2.5)
+    xv_batched_y = torch.Tensor(num_samples, 1, 1).uniform_(-2.5, 2.5)
+    xv_batched_z = torch.Tensor(num_samples, 1, 1).uniform_(-2.5, 2.5)
+    xv_batched = torch.cat((xv_batched_x, xv_batched_y, xv_batched_z), 1)
+    # print(xv_batched)
+    # xv_batched = torch.tensor([[[10.0], [10.0], [10.0]]])
+
+    # xc_batched = torch.tensor([[1.0]]).unsqueeze(-1).repeat(num_samples, 1, 1)
+    # xc_batched = torch.tensor([[[1.0]]])
+
+    # Limit of the box
+    # limit = float(np.random.randint(1, 5))
+    limit = float(i + 1)
+    # print(f"limit = {limit}")
+
+    # Define constraint input tensor
+    # xc_batched = torch.Tensor(num_samples, 1, 1).uniform_(1, 3)
+    xc_batched = torch.full((num_samples, 1, 1), limit)
+    x_batched = torch.cat((xv_batched, xc_batched), 1)
+
+    # print(xv_batched)
+    # print(xc_batched)
+    # print(x_batched)
+
+    my_layer.eval()  # This changes the self.training variable of the module
+
+    time_start = time.time()
+    result = my_layer(x_batched)
+    total_time_per_sample = (time.time() - time_start) / num_samples
+
+    result = result.detach().numpy()
+
+    y0 = my_layer.gety0()
+
+    # print("FINISHED")
+    # print(f"y0 = {y0}")
+    # print(f"xv = {xv_batched}")
+    # print(f"xc = {xc_batched}")
+    # print(f"result = {result}")
+
     ax = fig.add_subplot(rows, cols, i + 1, projection="3d")
-    ax.scatter(y0[i, 0, 0], y0[i, 1, 0], y0[i, 2, 0], color="r", s=100)
-    ax.scatter(result[i, 0, 0], result[i, 1, 0], result[i, 2, 0])
+    ax.set_title(f"limit = {limit}")
+    ax.title.set_size(10)
+    ax.scatter(y0[0, 0, 0], y0[0, 1, 0], y0[0, 2, 0], color="r", s=100)
+    ax.scatter(result[:, 0, 0], result[:, 1, 0], result[:, 2, 0])
 
 
 # my_dict = constraint.getDataAsDict()
