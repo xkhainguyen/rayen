@@ -13,6 +13,7 @@ from cvxpylayers.torch import CvxpyLayer
 import random
 import copy
 import time
+from . import constraints_torch
 
 
 class ConstraintModule(torch.nn.Module):
@@ -22,6 +23,7 @@ class ConstraintModule(torch.nn.Module):
         xc_dim=None,
         y_dim=None,
         method="RAYEN",
+        constraintInputMap=None,
         args_DC3=None,
     ):
         super().__init__()
@@ -32,27 +34,27 @@ class ConstraintModule(torch.nn.Module):
         self.k = y_dim  # Dimension of the ambient space (output)
         self.n = None  # Dimension of the embedded space (determined later)
         self.batch_size = None
+        self.constraintInputMap = constraintInputMap
 
-        self.has_linear_ineq_constraints = 1
-        self.has_linear_eq_constraints = 0
-        self.has_linear_constraints = (
-            self.has_linear_eq_constraints or self.has_linear_ineq_constraints
-        )
-        self.has_quadratic_constraints = 0
-        self.has_soc_constraints = 0
-        self.has_lmi_constraints = 0
+        # Pass dummy input to check the constraintInputMap users provide
+        self.cs = constraints_torch.ConvexConstraints()
+        temp_x = torch.ones(1, xc_dim, 1)  # just a vector
+        (
+            self.cs.lc.A1,
+            self.cs.lc.b1,
+            self.cs.lc.A2,
+            self.cs.lc.b2,
+        ) = self.constraintInputMap(temp_x)
+        # Get the dimension of all potential linear constraints stacked together
+        self.Ap_nrows = self.cs.lc.A1.shape[1]
+
+        self.cs.firstInit()
 
         self.selectSolver()
 
-        # Pass dummy input to check the constraintInputMap users provide
-        temp_x = torch.ones(xc_dim, 1)  # just a vector
-        temp_A1, temp_b1, temp_A2, temp_b2 = constraintInputMap(temp_x)
-        # Get the dimension of all potential constraints stacked together
-        self.Ap_nrows = temp_A1.shape[0]
-
-        if self.method == "RAYEN" or self.method == "RAYEN_old":
+        if self.method == "RAYEN":
             # Handle dimensions of ambient and embedded space
-            if self.has_linear_eq_constraints:
+            if self.cs.has_linear_eq_constraints:
                 self.n = self.k - 1  # Just one linear equality constraint
             else:
                 self.n = self.k
@@ -61,30 +63,7 @@ class ConstraintModule(torch.nn.Module):
 
             self.setupInteriorPointLayer()
 
-        if self.method == "RAYEN_old":
-            self.forwardForMethod = self.forwardForRAYENOld
-            self.dim_after_map = self.n + 1
-        elif self.method == "RAYEN":
             self.forwardForMethod = self.forwardForRAYEN
-            self.dim_after_map = self.n
-        elif self.method == "UU":
-            self.forwardForMethod = self.forwardForUU
-            self.dim_after_map = self.k
-        elif self.method == "Bar":
-            self.forwardForMethod = self.forwardForBar
-            self.dim_after_map = self.num_vertices + self.num_rays
-        elif self.method == "PP":
-            self.forwardForMethod = self.forwardForPP
-            self.dim_after_map = self.n
-        elif self.method == "UP":
-            self.forwardForMethod = self.forwardForUP
-            self.dim_after_map = self.n
-        elif self.method == "DC3":
-            self.forwardForMethod = self.forwardForDC3
-            self.dim_after_map = self.k - self.neq_DC3
-            assert self.dim_after_map == self.n
-        else:
-            raise NotImplementedError
 
         if create_step_input_map:
             self.stepInputMap = nn.Linear(self.m, self.n)
@@ -93,9 +72,9 @@ class ConstraintModule(torch.nn.Module):
 
     def selectSolver(self):
         installed_solvers = cp.installed_solvers()
-        if ("GUROBI" in installed_solvers) and self.has_lmi_constraints == False:
+        if ("GUROBI" in installed_solvers) and self.cs.has_lmi_constraints == False:
             self.solver = "GUROBI"  # You need to do `python -m pip install gurobipy`
-        elif ("ECOS" in installed_solvers) and self.has_lmi_constraints == False:
+        elif ("ECOS" in installed_solvers) and self.cs.has_lmi_constraints == False:
             self.solver = "ECOS"
         elif "SCS" in installed_solvers:
             self.solver = "SCS"
@@ -333,21 +312,21 @@ class ConstraintModule(torch.nn.Module):
 
     # TODO
     # From constraint input batch X, update all constraint data batch
-    def updateSubspaceConstraints(self, cs_dict):
-        if self.has_linear_constraints:
+    def updateSubspaceConstraints(self):
+        if self.cs.has_linear_constraints:
             # Retrive data from cs_dict
-            A1 = cs_dict["A1"]
-            b1 = cs_dict["b1"]
-            A2 = cs_dict["A2"]
-            b2 = cs_dict["b2"]
+            A1 = self.cs.lc.A1
+            b1 = self.cs.lc.b1
+            A2 = self.cs.lc.A2
+            b2 = self.cs.lc.b2
 
             # print(A1)
             # print(A2)
             # Stack the matrices so that the linear constraints look like Ax<=b
-            if self.has_linear_ineq_constraints:
+            if self.cs.has_linear_ineq_constraints:
                 A = A1
                 b = b1
-                if self.has_linear_eq_constraints:
+                if self.cs.has_linear_eq_constraints:
                     # Add the equality constraints as inequality constraints
                     A = torch.cat((A, A2, -A2), axis=1)
                     b = torch.cat((b, b2, -b2), axis=1)
@@ -364,8 +343,8 @@ class ConstraintModule(torch.nn.Module):
             # Here we simply choose E such that
             # A_E == A2, b_E == b_2
             # A_I == A1, b_I == b_1
-            if self.has_linear_ineq_constraints:
-                start = self.A1.shape[1]
+            if self.cs.has_linear_ineq_constraints:
+                start = A1.shape[1]
             else:
                 start = 0
             E = list(range(start, A.shape[1]))
@@ -509,12 +488,14 @@ class ConstraintModule(torch.nn.Module):
         # )
         # print(f"self.A_p = {self.A_p}")
         # print(f"self.b_p = {self.b_p}")
+
         ip_z0, ip_epsilon = self.ip_layer(
             self.A_p,
             self.b_p,
             solver_args={"solve_method": self.solver},
         )  # "max_iters": 10000
         # print(f"epsilon = {ip_epsilon}")
+
         # if ip_prob.status != "optimal" and ip_prob.status != "optimal_inaccurate":
         #     raise Exception(f"Value is not optimal, prob_status={ip_prob.status}")
 
@@ -526,9 +507,9 @@ class ConstraintModule(torch.nn.Module):
 
     # TODO
     # Forward pass for RAYEN
-    def forwardForRAYEN(self, v, cs_dict):
+    def forwardForRAYEN(self, v):
         # Update Ap, bp, NA_E
-        self.updateSubspaceConstraints(cs_dict)  # torch!!
+        self.updateSubspaceConstraints()  # torch!!
 
         # Solve interior point
         self.z0 = self.solveInteriorPoint()
@@ -563,11 +544,17 @@ class ConstraintModule(torch.nn.Module):
 
         # print(f"xc = {xc}")
         # TODO Refactor this into a class of ConvexConstraints
-        self.A1, self.b1, self.A2, self.b2 = torch.vmap(constraintInputMap)(xc)
-        cs_dict = {"A1": self.A1, "b1": self.b1, "A2": self.A2, "b2": self.b2}
+        (
+            self.cs.lc.A1,
+            self.cs.lc.b1,
+            self.cs.lc.A2,
+            self.cs.lc.b2,
+        ) = torch.vmap(
+            self.constraintInputMap
+        )(xc)
         ####################################################
 
-        y = self.forwardForMethod(v, cs_dict)
+        y = self.forwardForMethod(v)
 
         assert (
             torch.isnan(y).any()
@@ -585,45 +572,6 @@ class ConstraintModule(torch.nn.Module):
     def getzFromy(self, y):
         z = self.NA_E.T @ (y - self.yp)
         return z
-
-
-# TODO
-# Problem-specific map from single example x to constraint data
-def constraintInputMap(x):
-    # x is a rank-2 tensor
-    # outputs are rank-2 tensors
-    # 2x3x1 @ 2x1x1 => 2x3x1
-    A1 = torch.tensor([[0.0, -1.0], [x[0, 0], -4.0], [-2.0, 1.0]])
-    b1 = torch.tensor([[-2.0], [1.0], [-5.0]])
-    A2 = torch.tensor([])
-    b2 = torch.tensor([])
-    # A2 = torch.tensor([[1.0, 1.0, 1.0]])
-    # b2 = x[0, 0:1].unsqueeze(dim=1)
-    return A1, b1, A2, b2  # ASK do I need to move it to device?
-
-
-# # TODO
-# # Problem-specific map from single example x to constraint data
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-#     # 2x3x1 @ 2x1x1 => 2x3x1
-#     A1 = torch.tensor(
-#         [
-#             [1.0, 0, 0],
-#             [0, 1.0, 0],
-#             [0, 0, 1.0],
-#             [-1.0, 0, 0],
-#             [0, -1.0, 0],
-#             [0, 0, -1.0],
-#         ]
-#     )
-#     b1 = torch.tensor([[1.0], [1.0], [1.0], [0], [0], [0]]) @ x
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-#     # A2 = torch.tensor([[1.0, 1.0, 1.0]])
-#     # b2 = x[0, 0:1].unsqueeze(dim=1)
-#     return A1, b1, A2, b2  # ASK do I need to move it to device?
 
 
 def nullSpace(batch_A):

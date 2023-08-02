@@ -1,7 +1,13 @@
 import numpy as np
 import math
 import torch
+import torch.nn as nn
 from scipy.linalg import null_space
+import utils_examples
+
+import fixpath  # Following this example: https://github.com/tartley/colorama/blob/master/demos/demo01.py
+from rayen import utils, constraint_module, constraints_torch
+
 
 torch.set_default_dtype(torch.float64)
 # Set the default device to GPU if available, otherwise use CPU
@@ -121,27 +127,27 @@ torch.set_default_tensor_type(
 # b_I = torch.ones(batch_size, 1, 1)
 # print(b_I)
 
-A = torch.tensor([[[1.0, 1.0, 1.0]], [[1.0, 1.0, 1.0]]])
-b = torch.tensor([[[1.0]], [[1.0]]])
-A1 = torch.tensor([[1.0, 1.0, 1.0]])
-b1 = torch.tensor([[1.0]])
-print(A)
-print(b)
-print(A.device)
-print(np.linalg.pinv(A[0].cpu()) @ b[0].detach().cpu().numpy())
-# print(torch.pinverse(A, driver="gesvd"))
-# s = torch.linalg.svdvals(A[0])
-# print(s)
-yp = torch.linalg.lstsq(A1, b1).solution
-print(yp)
+# A = torch.tensor([[[1.0, 1.0, 1.0]], [[1.0, 1.0, 1.0]]])
+# b = torch.tensor([[[1.0]], [[1.0]]])
+# A1 = torch.tensor([[1.0, 1.0, 1.0]])
+# b1 = torch.tensor([[1.0]])
+# print(A)
+# print(b)
+# print(A.device)
+# print(np.linalg.pinv(A[0].cpu()) @ b[0].detach().cpu().numpy())
+# # print(torch.pinverse(A, driver="gesvd"))
+# # s = torch.linalg.svdvals(A[0])
+# # print(s)
+# yp = torch.linalg.lstsq(A1, b1).solution
+# print(yp)
 
 
-def pinv(A):
-    """
-    Return the pseudoinverse of A using the QR decomposition.
-    """
-    Q, R = torch.linalg.qr(A)
-    return R.pinverse() @ (Q.transpose(-1, -2))
+# def pinv(A):
+#     """
+#     Return the pseudoinverse of A using the QR decomposition.
+#     """
+#     Q, R = torch.linalg.qr(A)
+#     return R.pinverse() @ (Q.transpose(-1, -2))
 
 
 # print(pinv(A))
@@ -156,3 +162,38 @@ def pinv(A):
 
 # print("\nPseudo-inverse of A:")
 # print(A_pinv)
+
+# A = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+# A1 = torch.flatten(A, 0).unsqueeze(-1)
+# print(A1)
+
+
+# def constraintInputMap(x):
+#     # x is a rank-2 tensor
+#     # outputs are rank-2 tensors
+#     # 2x3x1 @ 2x1x1 => 2x3x1
+#     A1 = torch.tensor([[0.0, -1.0], [0.0, -4.0], [-2.0, 1.0]]) + torch.tensor(
+#         [[0.0, 0.0], [1.0, 0.0], [0.0, 0.0]]
+#     ) @ x @ torch.tensor([[1.0, 0.0]])
+#     b1 = torch.tensor([[-2.0], [1.0], [-5.0]]) @ torch.tensor([[0.0, 1.0]]) @ x
+#     A2 = torch.tensor([])
+#     b2 = torch.tensor([])
+#     # A2 = torch.tensor([[1.0, 1.0, 1.0]])
+#     # b2 = x[0, 0:1].unsqueeze(dim=1)
+#     return A1, b1, A2, b2
+
+
+# cs = constraints_torch.ConvexConstraints()
+# xc = torch.Tensor(2, 2, 1).uniform_(-2, 2)
+# cs.lc.A1, cs.lc.b1, cs.lc.A2, cs.lc.b2 = torch.vmap(constraintInputMap)(xc)
+# print(f"lc.A1 = {cs.lc.A1}")
+# print(f"lc.b2 = {cs.lc.b2}")
+# cs.firstInit()
+# print(f"lc.dim() = {cs.lc.dim}")
+# print(cs.lc.hasEqConstraints())
+# print(cs.lc.hasIneqConstraints())
+# # print(xc.dim())
+
+xc = torch.Tensor(5, 2, 1).uniform_(1, 3)
+xc_batched = torch.tile(xc, (2, 0))
+print(xc_batched)

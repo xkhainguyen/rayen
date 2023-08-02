@@ -21,6 +21,7 @@ import utils_examples
 import fixpath  # Following this example: https://github.com/tartley/colorama/blob/master/demos/demo01.py
 from rayen import constraints, constraint_module, utils
 
+np.set_printoptions(precision=2)
 
 torch.set_default_dtype(torch.float64)
 # Set the default device to GPU if available, otherwise use CPU
@@ -44,15 +45,59 @@ fig.suptitle(method, fontsize=14)
 #     # y0=np.array([[0.5], [0.0], [0.8]]),
 # )
 
+
+# TODO
+# Problem-specific map from single example x to constraint data
+def constraintInputMap(x):
+    # x is a rank-2 tensor
+    # outputs are rank-2 tensors
+    # 2x3x1 @ 2x1x1 => 2x3x1
+    A1 = torch.tensor([[0.0, -1.0], [0.0, -4.0], [-2.0, 1.0]]) + torch.tensor(
+        [[0.0, 0.0], [1.0, 0.0], [0.0, 0.0]]
+    ) @ x @ torch.tensor([[1.0, 0.0]])
+    b1 = torch.tensor([[-2.0], [1.0], [-5.0]]) @ torch.tensor([[0.0, 1.0]]) @ x
+    A2 = torch.tensor([])
+    b2 = torch.tensor([])
+    # A2 = torch.tensor([[1.0, 1.0, 1.0]])
+    # b2 = x[0, 0:1].unsqueeze(dim=1)
+    return A1, b1, A2, b2  # ASK do I need to move it to device?
+
+
+# # TODO
+# # Problem-specific map from single example x to constraint data
+# def constraintInputMap(x):
+#     # x is a rank-2 tensor
+#     # outputs are rank-2 tensors
+#     # 2x3x1 @ 2x1x1 => 2x3x1
+#     A1 = torch.tensor(
+#         [
+#             [1.0, 0, 0],
+#             [0, 1.0, 0],
+#             [0, 0, 1.0],
+#             [-1.0, 0, 0],
+#             [0, -1.0, 0],
+#             [0, 0, -1.0],
+#         ]
+#     )
+#     b1 = torch.tensor([[1.0], [1.0], [1.0], [0], [0], [0]]) @ x
+#     A2 = torch.tensor([])
+#     b2 = torch.tensor([])
+#     # A2 = torch.tensor([[1.0, 1.0, 1.0]])
+#     # b2 = x[0, 0:1].unsqueeze(dim=1)
+#     return A1, b1, A2, b2  # ASK do I need to move it to device?
+
 y_dim = 2
-my_layer = constraint_module.ConstraintModule(2, 1, y_dim, method=method)
+xc_dim = 2
+my_layer = constraint_module.ConstraintModule(
+    2, xc_dim, y_dim, method=method, constraintInputMap=constraintInputMap
+)
 
 num_cstr_samples = 4
 rows = math.ceil(math.sqrt(num_cstr_samples))
 cols = rows
 
 for i in range(num_cstr_samples):
-    num_samples = 1000  # 12000
+    num_samples = 500
 
     # Define step input tensor
     xv_batched_x = torch.Tensor(num_samples, 1, 1).uniform_(-2, 2)
@@ -65,14 +110,9 @@ for i in range(num_cstr_samples):
     # xc_batched = torch.tensor([[1.0]]).unsqueeze(-1).repeat(num_samples, 1, 1)
     # xc_batched = torch.tensor([[[1.0]]])
 
-    # Limit of the box
-    # limit = float(np.random.randint(1, 5))
-    limit = float(i + 1)
-    # print(f"limit = {limit}")
-
     # Define constraint input tensor
-    # xc_batched = torch.Tensor(num_samples, 1, 1).uniform_(1, 3)
-    xc_batched = torch.full((num_samples, 1, 1), limit)
+    xc = torch.Tensor(xc_dim, 1).uniform_(1, 3)
+    xc_batched = xc.unsqueeze(0).repeat(num_samples, 1, 1)
     x_batched = torch.cat((xv_batched, xc_batched), 1)
 
     # print(xv_batched)
@@ -96,7 +136,7 @@ for i in range(num_cstr_samples):
     # print(f"result = {result}")
 
     ax = fig.add_subplot(rows, cols, i + 1, projection="3d" if y_dim == 3 else None)
-    ax.set_title(f"limit = {limit}")
+    ax.set_title(f"xc = {xc.numpy().T}")
     ax.title.set_size(10)
     ax.scatter(y0[0, 0, 0], y0[0, 1, 0], color="r", s=100)
     ax.scatter(result[:, 0, 0], result[:, 1, 0])
