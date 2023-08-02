@@ -44,11 +44,17 @@ class ConstraintModule(torch.nn.Module):
             self.cs.lc.b1,
             self.cs.lc.A2,
             self.cs.lc.b2,
-        ) = self.constraintInputMap(temp_x)
-        # Get the dimension of all potential linear constraints stacked together
-        self.Ap_nrows = self.cs.lc.A1.shape[1]
+            self.cs.qcs.P,
+            self.cs.qcs.q,
+            self.cs.qcs.r,
+        ) = torch.vmap(self.constraintInputMap)(temp_x)
 
         self.cs.firstInit()
+        # Get the dimension of all potential linear constraints stacked together
+        if self.cs.has_linear_constraints:
+            self.Ap_nrows = self.cs.lc.A1.shape[1]
+        else:
+            self.Ap_nrows = 1
 
         self.selectSolver()
 
@@ -83,7 +89,7 @@ class ConstraintModule(torch.nn.Module):
         # elif 'CVXOPT' in installed_solvers:
         # 	self.solver='CVXOPT'
         else:
-            # TODO: There are more solvers, see https://www.cvxpy.org/tutorial/advanced/index.html#choosing-a-solver
+            # There are more solvers, see https://www.cvxpy.org/tutorial/advanced/index.html#choosing-a-solver
             raise Exception(f"Which solver do you have installed?")
             # Mapper does nothing
         self.solver = "SCS"
@@ -107,127 +113,124 @@ class ConstraintModule(torch.nn.Module):
     def computeKappa(self, v_bar):
         kappa = torch.relu(torch.max(self.D @ v_bar, dim=1, keepdim=True).values)
 
-        # if len(self.all_P) > 0 or len(self.all_M) > 0 or len(self.all_F) > 0:
-        #     rho = self.NA_E @ v_bar
-        #     rhoT = torch.transpose(rho, dim0=1, dim1=2)
-        #     all_kappas_positives = torch.empty(
-        #         (v_bar.shape[0], 0, 1), device=v_bar.device
-        #     )
+        if self.cs.has_nonlinear_constraints:
+            rho = self.NA_E @ v_bar
+            rhoT = torch.transpose(rho, -1, -2)
+            all_kappas_positives = torch.empty((self.batch_size, 0, 1))
 
-        #     for i in range(
-        #         self.all_P.shape[0]
-        #     ):  # for each of the quadratic constraints
-        #         # FIRST WAY (slower, easier to understand)
-        #         # P=self.all_P[i,:,:]
-        #         # q=self.all_q[i,:,:]
-        #         # r=self.all_r[i,:,:]
+            # for each of the quadratic constraints
+            # FIRST WAY (slower, easier to understand)
+            # P=self.all_P[i,:,:]
+            # q=self.all_q[i,:,:]
+            # r=self.all_r[i,:,:]
 
-        #         # c_prime=0.5*rhoT@P@rho;
-        #         # b_prime=(self.y0.T@P+ q.T)@rho;
-        #         # a_prime=(0.5*self.y0.T@P@self.y0 + q.T@self.y0 +r)
+            # c_prime=0.5*rhoT@P@rho;
+            # b_prime=(self.y0.T@P+ q.T)@rho;
+            # a_prime=(0.5*self.y0.T@P@self.y0 + q.T@self.y0 +r)
 
-        #         # kappa_positive_i_first_way=self.solveSecondOrderEq(a_prime, b_prime, c_prime, True)
+            # kappa_positive_i_first_way=self.solveSecondOrderEq(a_prime, b_prime, c_prime, True)
 
-        #         # SECOND WAY (faster)
-        #         kappa_positive_i = self.all_phi[i, :, :] @ rho + torch.sqrt(
-        #             rhoT @ self.all_delta[i, :, :] @ rho
-        #         )
+            # SECOND WAY (faster)
+            # print(f"self.NA_E = {self.NA_E}")
+            # print(f"self.phi = {self.phi}")
+            # print(f"rho = {rho}")
+            kappa_positive_i = self.phi @ rho + torch.sqrt(rhoT @ self.delta @ rho)
+            # print(kappa_positive_i)
 
-        #         # assert torch.allclose(kappa_positive_i,kappa_positive_i_first_way, atol=1e-06), f"{torch.max(torch.abs(kappa_positive_i-kappa_positive_i_first_way))}"
+            # assert torch.allclose(kappa_positive_i,kappa_positive_i_first_way, atol=1e-06), f"{torch.max(torch.abs(kappa_positive_i-kappa_positive_i_first_way))}"
 
-        #         assert torch.all(
-        #             kappa_positive_i >= 0
-        #         ), f"Smallest element is {kappa_positive_i}"  # If not, then Z may not be feasible (note that z0 is in the interior of Z)
-        #         all_kappas_positives = torch.cat(
-        #             (all_kappas_positives, kappa_positive_i), dim=1
-        #         )
+            assert torch.all(
+                kappa_positive_i >= 0
+            ), f"Smallest element is {kappa_positive_i}"  # If not, then Z may not be feasible (note that z0 is in the interior of Z)
+            all_kappas_positives = torch.cat(
+                (all_kappas_positives, kappa_positive_i), dim=1
+            )
 
-        #     for i in range(self.all_M.shape[0]):  # for each of the SOC constraints
-        #         M = self.all_M[i, :, :]
-        #         s = self.all_s[i, :, :]
-        #         c = self.all_c[i, :, :]
-        #         d = self.all_d[i, :, :]
+            #     for i in range(self.all_M.shape[0]):  # for each of the SOC constraints
+            #         M = self.all_M[i, :, :]
+            #         s = self.all_s[i, :, :]
+            #         c = self.all_c[i, :, :]
+            #         d = self.all_d[i, :, :]
 
-        #         beta = M @ self.y0 + s
-        #         tau = c.T @ self.y0 + d
+            #         beta = M @ self.y0 + s
+            #         tau = c.T @ self.y0 + d
 
-        #         c_prime = rhoT @ M.T @ M @ rho - torch.square(c.T @ rho)
-        #         b_prime = 2 * rhoT @ M.T @ beta - 2 * (c.T @ rho) @ tau
-        #         a_prime = beta.T @ beta - torch.square(tau)
+            #         c_prime = rhoT @ M.T @ M @ rho - torch.square(c.T @ rho)
+            #         b_prime = 2 * rhoT @ M.T @ beta - 2 * (c.T @ rho) @ tau
+            #         a_prime = beta.T @ beta - torch.square(tau)
 
-        #         kappa_positive_i = self.solveSecondOrderEq(
-        #             a_prime, b_prime, c_prime, False
-        #         )
+            #         kappa_positive_i = self.solveSecondOrderEq(
+            #             a_prime, b_prime, c_prime, False
+            #         )
 
-        #         assert torch.all(
-        #             kappa_positive_i >= 0
-        #         )  # If not, then either the feasible set is infeasible (note that z0 is inside the feasible set)
-        #         all_kappas_positives = torch.cat(
-        #             (all_kappas_positives, kappa_positive_i), dim=1
-        #         )
+            #         assert torch.all(
+            #             kappa_positive_i >= 0
+            #         )  # If not, then either the feasible set is infeasible (note that z0 is inside the feasible set)
+            #         all_kappas_positives = torch.cat(
+            #             (all_kappas_positives, kappa_positive_i), dim=1
+            #         )
 
-        #     if len(self.all_F) > 0:  # If there are LMI constraints:
-        #         ############# OBTAIN S
-        #         # First option (much slower)
-        #         # S=self.all_F[0,:,:]*rho[:,0:(0+1),0:1]
-        #         # for i in range(1,len(self.all_F)-1):
-        #         # 	#See https://discuss.pytorch.org/t/scalar-matrix-multiplication-for-a-tensor-and-an-array-of-scalars/100174/2
-        #         # 	S += self.all_F[i,:,:]*rho[:,i:(i+1),0:1]
+            #     if len(self.all_F) > 0:  # If there are LMI constraints:
+            #         ############# OBTAIN S
+            #         # First option (much slower)
+            #         # S=self.all_F[0,:,:]*rho[:,0:(0+1),0:1]
+            #         # for i in range(1,len(self.all_F)-1):
+            #         # 	#See https://discuss.pytorch.org/t/scalar-matrix-multiplication-for-a-tensor-and-an-array-of-scalars/100174/2
+            #         # 	S += self.all_F[i,:,:]*rho[:,i:(i+1),0:1]
 
-        #         # Second option (much faster)
-        #         S = torch.einsum(
-        #             "ajk,ial->ijk", [self.all_F[0:-1, :, :], rho]
-        #         )  # See the tutorial https://rockt.github.io/2018/04/30/einsum
+            #         # Second option (much faster)
+            #         S = torch.einsum(
+            #             "ajk,ial->ijk", [self.all_F[0:-1, :, :], rho]
+            #         )  # See the tutorial https://rockt.github.io/2018/04/30/einsum
 
-        #         ############# COMPUTE THE EIGENVALUES
+            #         ############# COMPUTE THE EIGENVALUES
 
-        #         ## Option 1: (compute whole spectrum of the matrix, using the non-symmetric matrix self.mHinv@S)
-        #         # eigenvalues = torch.unsqueeze(torch.linalg.eigvals(self.mHinv@S),2) #Note that mHinv@M is not symmetric but always have real eigenvalues
-        #         # assert (torch.all(torch.isreal(eigenvalues)))
-        #         # largest_eigenvalue = torch.max(eigenvalues.real, dim=1, keepdim=True).values
+            #         ## Option 1: (compute whole spectrum of the matrix, using the non-symmetric matrix self.mHinv@S)
+            #         # eigenvalues = torch.unsqueeze(torch.linalg.eigvals(self.mHinv@S),2) #Note that mHinv@M is not symmetric but always have real eigenvalues
+            #         # assert (torch.all(torch.isreal(eigenvalues)))
+            #         # largest_eigenvalue = torch.max(eigenvalues.real, dim=1, keepdim=True).values
 
-        #         LTmSL = self.L.T @ (-S) @ self.L  # This matrix is symmetric
+            #         LTmSL = self.L.T @ (-S) @ self.L  # This matrix is symmetric
 
-        #         ## Option 2: (compute whole spectrum of the matrix, using the symmetric matrix LTmSL). Much faster than Option 1
-        #         eigenvalues = torch.unsqueeze(
-        #             torch.linalg.eigvalsh(LTmSL), 2
-        #         )  # Note that L^T (-S) L is a symmetric matrix
-        #         largest_eigenvalue = torch.max(eigenvalues, dim=1, keepdim=True).values
+            #         ## Option 2: (compute whole spectrum of the matrix, using the symmetric matrix LTmSL). Much faster than Option 1
+            #         eigenvalues = torch.unsqueeze(
+            #             torch.linalg.eigvalsh(LTmSL), 2
+            #         )  # Note that L^T (-S) L is a symmetric matrix
+            #         largest_eigenvalue = torch.max(eigenvalues, dim=1, keepdim=True).values
 
-        #         ## Option 3: Use LOBPCG with A=LTmSL and B=I. The advantage of this method is that only the largest eigenvalue is computed. But, empirically, this option is faster than option 2 only for very big matrices (>1000x1000)
-        #         # guess_lobpcg=torch.rand(1, H.shape[0], 1);
-        #         # size_batch=v_bar.shape[0]
-        #         # largest_eigenvalue, _ = torch.lobpcg(A=LTmSL, k=1, B=None, niter=-1) #, X=guess_lobpcg.expand(size_batch, -1, -1)
-        #         # largest_eigenvalue=torch.unsqueeze(largest_eigenvalue, 1)
+            #         ## Option 3: Use LOBPCG with A=LTmSL and B=I. The advantage of this method is that only the largest eigenvalue is computed. But, empirically, this option is faster than option 2 only for very big matrices (>1000x1000)
+            #         # guess_lobpcg=torch.rand(1, H.shape[0], 1);
+            #         # size_batch=v_bar.shape[0]
+            #         # largest_eigenvalue, _ = torch.lobpcg(A=LTmSL, k=1, B=None, niter=-1) #, X=guess_lobpcg.expand(size_batch, -1, -1)
+            #         # largest_eigenvalue=torch.unsqueeze(largest_eigenvalue, 1)
 
-        #         ## Option 4: Use power iteration to compute the largest eigenvalue. Often times is slower than just computing the whole spectrum, and sometimes it does not converge
-        #         # guess_v = torch.nn.functional.normalize(torch.rand(S.shape[1],1), dim=0)
-        #         # largest_eigenvalue=utils.findLargestEigenvalueUsingPowerIteration(self.mHinv@S, guess_v)
+            #         ## Option 4: Use power iteration to compute the largest eigenvalue. Often times is slower than just computing the whole spectrum, and sometimes it does not converge
+            #         # guess_v = torch.nn.functional.normalize(torch.rand(S.shape[1],1), dim=0)
+            #         # largest_eigenvalue=utils.findLargestEigenvalueUsingPowerIteration(self.mHinv@S, guess_v)
 
-        #         ## Option 5: Use LOBPCG with A=-S and B=H. There are two problems though:
-        #         # --> This issue: https://github.com/pytorch/pytorch/issues/101075
-        #         # --> Backward is not implemented for B!=I, see: https://github.com/pytorch/pytorch/blob/d54fcd571af48685b0699f6ac1e31b6871d0d768/torch/_lobpcg.py#L329
+            #         ## Option 5: Use LOBPCG with A=-S and B=H. There are two problems though:
+            #         # --> This issue: https://github.com/pytorch/pytorch/issues/101075
+            #         # --> Backward is not implemented for B!=I, see: https://github.com/pytorch/pytorch/blob/d54fcd571af48685b0699f6ac1e31b6871d0d768/torch/_lobpcg.py#L329
 
-        #         ## Option 6: Use https://github.com/rfeinman/Torch-ARPACK with LTmSL. The problem is that backward() is not implemented yet
+            #         ## Option 6: Use https://github.com/rfeinman/Torch-ARPACK with LTmSL. The problem is that backward() is not implemented yet
 
-        #         ## Option 7: Use https://github.com/buwantaiji/DominantSparseEigenAD. But it does not have support for batched matrices, see https://github.com/buwantaiji/DominantSparseEigenAD/issues/1
+            #         ## Option 7: Use https://github.com/buwantaiji/DominantSparseEigenAD. But it does not have support for batched matrices, see https://github.com/buwantaiji/DominantSparseEigenAD/issues/1
 
-        #         kappa_positive_i = torch.relu(largest_eigenvalue)
+            #         kappa_positive_i = torch.relu(largest_eigenvalue)
 
-        #         all_kappas_positives = torch.cat(
-        #             (all_kappas_positives, kappa_positive_i), dim=1
-        #         )
+            #         all_kappas_positives = torch.cat(
+            #             (all_kappas_positives, kappa_positive_i), dim=1
+            #         )
 
-        #     kappa_nonlinear_constraints = torch.max(
-        #         all_kappas_positives, dim=1, keepdim=True
-        #     ).values
-        #     kappa = torch.maximum(kappa, kappa_nonlinear_constraints)
+            kappa_nonlinear_constraints = torch.max(
+                all_kappas_positives, dim=1, keepdim=True
+            ).values
+            kappa = torch.maximum(kappa, kappa_nonlinear_constraints)
 
         assert torch.all(kappa >= 0)
 
         return kappa
 
-    # TODO
     # Function to recompute and register params
     def updateForwardParams(self):
         # self.register_buffer("A_p", torch.Tensor(self.cs.A_p))
@@ -245,72 +248,23 @@ class ConstraintModule(torch.nn.Module):
         self.D = self.A_p / (
             (self.b_p - self.A_p @ self.z0) @ torch.ones(self.batch_size, 1, self.n)
         )  # for linear
-        # print(f"D = {self.D}")
-        # all_P, all_q, all_r = utils.getAllPqrFromQcs(self.cs.qcs)
-        # all_M, all_s, all_c, all_d = utils.getAllMscdFromSocs(self.cs.socs)
 
-        # if self.cs.has_lmi_constraints:
-        #     all_F = copy.deepcopy(self.cs.lmic.all_F)
-        #     H = all_F[-1]
-        #     for i in range(self.cs.lmic.dim()):
-        #         H += self.cs.y0[i, 0] * self.cs.lmic.all_F[i]
-        #     Hinv = np.linalg.inv(H)
-        #     mHinv = -Hinv
-        #     L = np.linalg.cholesky(Hinv)  # Hinv = L @ L^T
-        #     self.register_buffer("mHinv", torch.Tensor(mHinv))
-        #     self.register_buffer("L", torch.Tensor(L))
+        if self.cs.has_quadratic_constraints:
+            P = self.cs.qcs.P
+            q = self.cs.qcs.q
+            r = self.cs.qcs.r
+            y0 = self.y0
+            y0t = y0.transpose(-1, -2)
+            qt = q.transpose(-1, -2)
 
-        # else:
-        #     all_F = []
-
-        # # See https://discuss.pytorch.org/t/model-cuda-does-not-convert-all-variables-to-cuda/114733/9
-        # # and https://discuss.pytorch.org/t/keeping-constant-value-in-module-on-correct-device/10129
-        # self.register_buffer("D", torch.Tensor(D))
-        # self.register_buffer("all_P", torch.Tensor(np.array(all_P)))
-        # self.register_buffer("all_q", torch.Tensor(np.array(all_q)))
-        # self.register_buffer("all_r", torch.Tensor(np.array(all_r)))
-        # self.register_buffer("all_M", torch.Tensor(np.array(all_M)))
-        # self.register_buffer("all_s", torch.Tensor(np.array(all_s)))
-        # self.register_buffer("all_c", torch.Tensor(np.array(all_c)))
-        # self.register_buffer("all_d", torch.Tensor(np.array(all_d)))
-        # # self.register_buffer("all_F", torch.Tensor(np.array(all_F))) #This one dies (probably because out of memory) when all_F contains more than 7000 matrices 500x500 approx
-        # self.register_buffer("all_F", torch.Tensor(all_F))
-
-        # # self.register_buffer("z0", torch.Tensor(self.z0))
-        # # self.register_buffer("y0", torch.Tensor(self.y0))
-
-        # # Precompute to find roots of quadratic equation
-        # if self.cs.has_quadratic_constraints:
-        #     all_delta = []
-        #     all_phi = []
-
-        #     for i in range(
-        #         self.all_P.shape[0]
-        #     ):  # for each of the quadratic constraints
-        #         P = self.all_P[i, :, :]
-        #         q = self.all_q[i, :, :]
-        #         r = self.all_r[i, :, :]
-        #         y0 = self.y0
-
-        #         sigma = 2 * (0.5 * y0.T @ P @ y0 + q.T @ y0 + r)
-        #         phi = -(y0.T @ P + q.T) / sigma
-        #         delta = (
-        #             (y0.T @ P + q.T).T @ (y0.T @ P + q.T)
-        #             - 4 * (0.5 * y0.T @ P @ y0 + q.T @ y0 + r) * 0.5 * P
-        #         ) / torch.square(sigma)
-
-        #         all_delta.append(delta)
-        #         all_phi.append(phi)
-
-        #     all_delta = torch.stack(all_delta)
-        #     all_phi = torch.stack(all_phi)
-
-        #     self.register_buffer("all_delta", all_delta)
-        #     self.register_buffer("all_phi", all_phi)
-
+            self.sigma = 2 * (0.5 * y0t @ P @ y0 + qt @ y0 + r)
+            self.phi = -(y0t @ P + qt) / self.sigma
+            self.delta = (
+                (y0t @ P + qt).transpose(-1, -2) @ (y0t @ P + qt)
+                - 4 * (0.5 * y0t @ P @ y0 + qt @ y0 + r) * 0.5 * P
+            ) / torch.square(self.sigma)
         return True
 
-    # TODO
     # From constraint input batch X, update all constraint data batch
     def updateSubspaceConstraints(self):
         if self.cs.has_linear_constraints:
@@ -441,22 +395,32 @@ class ConstraintModule(torch.nn.Module):
         # utils.verify(self.n == (self.k - np.linalg.matrix_rank(self.A_E[0])))
         return True
 
-    # TODO
-    def getConstraintsInSubspaceCvxpy(self, z, A_p, b_p, epsilon=0.0):
+    def getConstraintsInSubspaceCvxpy(
+        self, z, y, NA_E, yp, A_p, b_p, P, q, r, epsilon=0.0
+    ):
         constraints = [A_p @ z - b_p <= -epsilon * torch.ones((self.Ap_nrows, 1))]
+        constraints += [y == NA_E @ z + yp]
+
+        # constraints += self.cs.qcs.asCvxpy(y, P, q, r, epsilon)
+        constraints += [0.5 * cp.sum_squares(P @ y) + q.T @ y + r <= -epsilon]
         return constraints
 
-    # TODO
     # Setup interior point problem beforehand
     def setupInteriorPointLayer(self):
         self.ip_epsilon = cp.Variable()
         self.ip_z0 = cp.Variable((self.n, 1))
+        self.ip_y = cp.Variable((self.k, 1))
 
         # self.ip_constraints = cp.Parameter((X, 1))  # need size
+        yp = cp.Parameter((self.k, 1))
+        NA_E = cp.Parameter((self.k, self.n))
         A_p = cp.Parameter((self.Ap_nrows, self.n))
         b_p = cp.Parameter((self.Ap_nrows, 1))
+        P = cp.Parameter((self.n, self.n))
+        q = cp.Parameter((self.n, 1))
+        r = cp.Parameter((1, 1))
         self.ip_constraints = self.getConstraintsInSubspaceCvxpy(
-            self.ip_z0, A_p, b_p, self.ip_epsilon
+            self.ip_z0, self.ip_y, NA_E, yp, A_p, b_p, P, q, r, self.ip_epsilon
         )
         # print(self.ip_constraints)
         self.ip_constraints.append(self.ip_epsilon >= 0)
@@ -470,8 +434,8 @@ class ConstraintModule(torch.nn.Module):
         assert self.ip_prob.is_dpp()
         self.ip_layer = CvxpyLayer(
             self.ip_prob,
-            parameters=[A_p, b_p],
-            variables=[self.ip_z0, self.ip_epsilon],
+            parameters=[NA_E, yp, A_p, b_p, P, q, r],
+            variables=[self.ip_z0, self.ip_epsilon, self.ip_y],
         )
 
         print_debug_info = 0
@@ -479,7 +443,6 @@ class ConstraintModule(torch.nn.Module):
             utils.printInBoldBlue("Set up interior point problem")
         return True
 
-    # TODO
     # Function to compute z0
     def solveInteriorPoint(self):
         # Update constraint
@@ -489,9 +452,14 @@ class ConstraintModule(torch.nn.Module):
         # print(f"self.A_p = {self.A_p}")
         # print(f"self.b_p = {self.b_p}")
 
-        ip_z0, ip_epsilon = self.ip_layer(
+        ip_z0, ip_epsilon, ip_y = self.ip_layer(
+            self.NA_E,
+            self.yp,
             self.A_p,
             self.b_p,
+            self.cs.qcs.P,
+            self.cs.qcs.q,
+            self.cs.qcs.r,
             solver_args={"solve_method": self.solver},
         )  # "max_iters": 10000
         # print(f"epsilon = {ip_epsilon}")
@@ -505,7 +473,6 @@ class ConstraintModule(torch.nn.Module):
 
         return ip_z0
 
-    # TODO
     # Forward pass for RAYEN
     def forwardForRAYEN(self, v):
         # Update Ap, bp, NA_E
@@ -549,9 +516,10 @@ class ConstraintModule(torch.nn.Module):
             self.cs.lc.b1,
             self.cs.lc.A2,
             self.cs.lc.b2,
-        ) = torch.vmap(
-            self.constraintInputMap
-        )(xc)
+            self.cs.qcs.P,
+            self.cs.qcs.q,
+            self.cs.qcs.r,
+        ) = torch.vmap(self.constraintInputMap)(xc)
         ####################################################
 
         y = self.forwardForMethod(v)

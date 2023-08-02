@@ -58,9 +58,12 @@ def constraintInputMap(x):
     b1 = torch.tensor([[-2.0], [1.0], [-5.0]]) @ torch.tensor([[0.0, 1.0]]) @ x
     A2 = torch.tensor([])
     b2 = torch.tensor([])
+    P = torch.tensor([])
+    q = P
+    r = P
     # A2 = torch.tensor([[1.0, 1.0, 1.0]])
     # b2 = x[0, 0:1].unsqueeze(dim=1)
-    return A1, b1, A2, b2  # ASK do I need to move it to device?
+    return A1, b1, A2, b2, P, q, r  # ASK do I need to move it to device?
 
 
 # # TODO

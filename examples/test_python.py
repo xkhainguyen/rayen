@@ -100,33 +100,6 @@ torch.set_default_tensor_type(
 # print(my_nullspace(batch_A))
 
 
-# A = torch.tensor(
-#     [[0.81649658, 0.0], [-0.40824829, -0.70710678], [-0.40824829, 0.70710678]]
-# )
-# A_batch = A.unsqueeze(0).repeat(5, 1, 1)
-# print(A_batch)
-
-# batch_size = 2
-# n = 3
-# NA_E = torch.eye(n).unsqueeze(0).repeat(batch_size, 1, 1)
-# print(NA_E)
-# yp = torch.zeros(batch_size, n, 1)
-# print(yp)
-# A_p = torch.zeros(batch_size, 1, n)  # 0z<=1
-# print(A_p)
-# b_p = torch.ones(batch_size, 1, 1)
-# print(b_p)
-# A_E = torch.zeros(batch_size, 1, n)
-# print(A_E)
-# # 0y=0
-# b_E = torch.zeros(batch_size, 1, 1)
-# print(b_E)
-# A_I = torch.zeros(batch_size, 1, n)
-# print(A_I)
-# # 0y<=1
-# b_I = torch.ones(batch_size, 1, 1)
-# print(b_I)
-
 # A = torch.tensor([[[1.0, 1.0, 1.0]], [[1.0, 1.0, 1.0]]])
 # b = torch.tensor([[[1.0]], [[1.0]]])
 # A1 = torch.tensor([[1.0, 1.0, 1.0]])
@@ -167,33 +140,5 @@ torch.set_default_tensor_type(
 # A1 = torch.flatten(A, 0).unsqueeze(-1)
 # print(A1)
 
-
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-#     # 2x3x1 @ 2x1x1 => 2x3x1
-#     A1 = torch.tensor([[0.0, -1.0], [0.0, -4.0], [-2.0, 1.0]]) + torch.tensor(
-#         [[0.0, 0.0], [1.0, 0.0], [0.0, 0.0]]
-#     ) @ x @ torch.tensor([[1.0, 0.0]])
-#     b1 = torch.tensor([[-2.0], [1.0], [-5.0]]) @ torch.tensor([[0.0, 1.0]]) @ x
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-#     # A2 = torch.tensor([[1.0, 1.0, 1.0]])
-#     # b2 = x[0, 0:1].unsqueeze(dim=1)
-#     return A1, b1, A2, b2
-
-
-# cs = constraints_torch.ConvexConstraints()
-# xc = torch.Tensor(2, 2, 1).uniform_(-2, 2)
-# cs.lc.A1, cs.lc.b1, cs.lc.A2, cs.lc.b2 = torch.vmap(constraintInputMap)(xc)
-# print(f"lc.A1 = {cs.lc.A1}")
-# print(f"lc.b2 = {cs.lc.b2}")
-# cs.firstInit()
-# print(f"lc.dim() = {cs.lc.dim}")
-# print(cs.lc.hasEqConstraints())
-# print(cs.lc.hasIneqConstraints())
-# # print(xc.dim())
-
-xc = torch.Tensor(5, 2, 1).uniform_(1, 3)
-xc_batched = torch.tile(xc, (2, 0))
-print(xc_batched)
+A = torch.tensor([[[1.0, 2.0], [2.0, 1.0]]])
+print(A * 1.0)

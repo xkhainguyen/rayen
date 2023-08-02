@@ -141,6 +141,19 @@ def checkMatrixisSymmetric(A):
     verify(np.allclose(A, A.T))
 
 
+def isZeroTensor(A):
+    return not torch.any(A)
+
+
+def checkNonZeroTensor(A):
+    verify(not isZeroTensor(A), "zero matrix in tensor")
+
+
+def checkSymmetricTensor(A):
+    verify(A.shape[1] == A.shape[2], "non-square matrix in tensor")
+    verify(torch.allclose(A, A.transpose(-1, -2)), "non-symmetric matrix in tensor")
+
+
 def checkMatrixisPsd(A, tol=0.0):
     checkMatrixisSymmetric(A)
     eigenvalues = np.linalg.eigvals(A)
