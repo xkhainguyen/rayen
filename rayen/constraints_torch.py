@@ -84,12 +84,14 @@ class ConvexQuadraticConstraints:
     def __init__(
         self,
         P=torch.tensor([]),
+        P_sqrt=torch.tensor([]),
         q=torch.tensor([]),
         r=torch.tensor([]),
         num=0,
         do_checks_P=False,
     ):
         self.P = P
+        self.P_sqrt = P_sqrt
         self.q = q
         self.r = r
         self.dim = 0
@@ -136,7 +138,7 @@ class ConvexQuadraticConstraints:
 
     def at(self, i):
         # Within sample
-        return range(i * self.num, (i + 1) * self.num)
+        return range(i * self.dim, (i + 1) * self.dim)
 
     def asCvxpy(self, y, P_sqrt, q, r, epsilon=0.0):
         # Within sample, one constraint
@@ -206,4 +208,8 @@ class ConvexConstraints:
         if self.has_quadratic_constraints:
             all_dim.append(self.qcs.dim)
 
-        utils.verify(utils.all_equal(all_dim))
+        utils.verify(utils.all_equal(all_dim), "wrong constraint dimension")
+        utils.verify(
+            self.num_qc * self.qcs.dim == self.qcs.P.shape[1],
+            "wrong quadratic constraint number",
+        )

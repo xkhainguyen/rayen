@@ -56,6 +56,7 @@ class ConstraintModule(torch.nn.Module):
             self.cs.lc.A2,
             self.cs.lc.b2,
             self.cs.qcs.P,
+            self.cs.qcs.P_sqrt,
             self.cs.qcs.q,
             self.cs.qcs.r,
         ) = torch.vmap(self.constraintInputMap)(temp_x)
@@ -292,6 +293,7 @@ class ConstraintModule(torch.nn.Module):
         constraints += [y == NA_E @ z + yp]
         for i in range(self.cs.num_qc):
             idx = self.cs.qcs.at(i)
+            # print(f"idx = {idx}")
             constraints += self.cs.qcs.asCvxpy(
                 y, P_sqrt[idx, :], q[idx, :], r[i], epsilon
             )
@@ -346,14 +348,13 @@ class ConstraintModule(torch.nn.Module):
         # print(f"P = {self.cs.qcs.P}")
         # print(f"q = {self.cs.qcs.q}")
         # print(f"r = {self.cs.qcs.r}")
-        P_sqrt = torch.vmap(self.stackCholesky)(self.cs.qcs.P)
 
         ip_z0, ip_epsilon, ip_y = self.ip_layer(
             self.NA_E,
             self.yp,
             self.A_p,
             self.b_p,
-            P_sqrt,
+            self.cs.qcs.P_sqrt,
             self.cs.qcs.q,
             self.cs.qcs.r,
             solver_args={"solve_method": self.solver},
@@ -509,6 +510,7 @@ class ConstraintModule(torch.nn.Module):
         kappa = self.computeKappa(v_bar)
         norm_v = torch.linalg.vector_norm(v, dim=(1, 2), keepdim=True)
         alpha = torch.minimum(1 / kappa, norm_v)
+        # print(f"alpha = {alpha}")
         return self.getyFromz(self.z0 + alpha * v_bar)
 
     def forward(self, x):
@@ -518,6 +520,7 @@ class ConstraintModule(torch.nn.Module):
         # each sample includes xv (size m) and xc (size d)
         # x has dimensions [nsib, m + d, 1]
         self.batch_size = x.shape[0]
+        utils.verify(x.shape[1] == self.m + self.d, "wrong input dimension")
         xv = x[:, 0 : self.m, 0:1]  # After this, xv has dim [nsib, m, 1]
         xc = x[:, self.m : self.m + self.d, 0:1]  # After this, xv has dim [nsib, d, 1]
 
@@ -530,13 +533,14 @@ class ConstraintModule(torch.nn.Module):
         )  # After this, q has dimensions [nsib, numel_output_mapper, 1]
 
         # print(f"xc = {xc}")
-        # TODO Refactor this into a class of ConvexConstraints
+        # print(f"v = {v}")
         (
             self.cs.lc.A1,
             self.cs.lc.b1,
             self.cs.lc.A2,
             self.cs.lc.b2,
             self.cs.qcs.P,
+            self.cs.qcs.P_sqrt,
             self.cs.qcs.q,
             self.cs.qcs.r,
         ) = torch.vmap(self.constraintInputMap)(xc)
@@ -561,12 +565,12 @@ class ConstraintModule(torch.nn.Module):
         z = self.NA_E.T @ (y - self.yp)
         return z
 
-    def stackCholesky(self, A):
-        output = torch.empty((0, self.k))
-        for i in range(self.cs.num_qc):
-            idx = self.cs.qcs.at(i)
-            output = torch.cat((output, torch.linalg.cholesky(A[idx, :])), dim=0)
-        return output
+    # def stackCholesky(self, A):
+    #     output = torch.empty((0, self.k))
+    #     for i in range(self.cs.num_qc):
+    #         idx = self.cs.qcs.at(i)
+    #         output = torch.cat((output, torch.linalg.cholesky(A[idx, :])), dim=0)
+    #     return output
 
 
 def nullSpace(batch_A):
