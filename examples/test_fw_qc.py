@@ -59,14 +59,14 @@ def constraintInputMap(x):
     b2 = torch.tensor([])
 
     # Quadratic constraints
-    r1 = 1.0
+    r1 = 2.0
     c1 = x
     E1 = (1 / (r1 * r1)) * torch.eye(2)
     P1 = 2 * E1
     q1 = -2 * E1 @ c1
     r1 = c1.transpose(-1, -2) @ E1 @ c1 - 1
 
-    r2 = 1.0
+    r2 = 2.0
     c2 = x * 0.9
     E2 = (1 / (r2 * r2)) * torch.eye(2)
     P2 = 2 * E2
@@ -106,11 +106,17 @@ def constraintInputMap(x):
 y_dim = 2
 xc_dim = 2
 num_cstr = [0, 0, 2, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
+
 my_layer = constraint_module.ConstraintModule(
-    2, xc_dim, y_dim, method=method, num_cstr, constraintInputMap=constraintInputMap
+    xv_dim=2,
+    xc_dim=xc_dim,
+    y_dim=y_dim,
+    method=method,
+    num_cstr=num_cstr,
+    constraintInputMap=constraintInputMap,
 )
 
-num_cstr_samples = 1
+num_cstr_samples = 4
 rows = math.ceil(math.sqrt(num_cstr_samples))
 cols = rows
 
@@ -129,8 +135,8 @@ for i in range(num_cstr_samples):
     # xc_batched = torch.tensor([[[1.0]]])
 
     # Define constraint input tensor
-    # xc = torch.Tensor(xc_dim, 1).uniform_(1, 3)
-    xc = torch.tensor([[10.0], [10.0]])  # FIXME why does this need origin for IP = 0
+    xc = torch.Tensor(xc_dim, 1).uniform_(5, 15)
+    # xc = torch.tensor([[10.0], [10.0]])  # FIXME why does this need origin for IP = 0
     xc_batched = xc.unsqueeze(0).repeat(num_samples, 1, 1)
     x_batched = torch.cat((xv_batched, xc_batched), 1)
 

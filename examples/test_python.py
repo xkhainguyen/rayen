@@ -125,7 +125,9 @@ torch.set_default_tensor_type(
 
 # print(pinv(A))
 # Create a 2x3 matrix
-# A = torch.tensor([[1, 2, 3.0], [4, 5, 6]])
+A = torch.tensor(
+    [[[4, 0], [0, 4], [2, 0.0], [0, 2]], [[1, 0], [0, 1.0], [3, 0], [0, 3]]]
+)
 
 # # Compute the pseudo-inverse of A
 # A_pinv = torch.pinverse(A)
@@ -135,11 +137,21 @@ torch.set_default_tensor_type(
 
 # print("\nPseudo-inverse of A:")
 # print(A_pinv)
+print(A)
+# P_sqrt = [A[:, i : i + 2, :] for i in range(2)]
+# print(P_sqrt)
 
-A = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-B = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-# A1 = torch.flatten(A, 0).unsqueeze(-1)
-# print(A1)
 
-AB = torch.cat((A, B), dim=1)
-print(AB)
+def choleskyidx(A, num):
+    # num = 2
+    output = torch.empty((0, 2))
+    for i in range(num):
+        output = torch.cat(
+            (output, torch.linalg.cholesky(A[i * num : (i + 1) * num, :])), dim=0
+        )
+    return output
+
+
+# print(choleskyidx(A[0]))
+result = torch.vmap(choleskyidx)(A, num=2)
+print(result)

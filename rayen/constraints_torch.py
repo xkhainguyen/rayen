@@ -19,14 +19,16 @@ import time
 # everything is torch
 
 
-class LinearConstraint:
+class LinearConstraints:
     # Constraint is A1<=b1, A2=b2
+    # A and b are tensors of batched samples
     def __init__(
         self,
         A1=torch.tensor([]),
         b1=torch.tensor([]),
         A2=torch.tensor([]),
         b2=torch.tensor([]),
+        num=None,
     ):
         self.A1 = A1
         self.b1 = b1
@@ -76,59 +78,68 @@ class LinearConstraint:
         return [A_p @ z - b_p <= -epsilon * torch.ones((A_p.shape[0], 1))]
 
 
-class ConvexQuadraticConstraint:
-    # Constraint is (1/2)x'Px + q'x +r <=0
+class ConvexQuadraticConstraints:
+    # Constraint in form (1/2)x'P[i]x + q[i]'x +r[i] <=0
+    # Include all P, q, r stacked in a sample
     def __init__(
         self,
         P=torch.tensor([]),
         q=torch.tensor([]),
         r=torch.tensor([]),
+        num=0,
         do_checks_P=False,
     ):
         self.P = P
         self.q = q
         self.r = r
         self.dim = 0
+        self.num = num
 
-        if do_checks_P == True:
-            utils.checkNonZeroTensor(self.P)
-            utils.checkSymmetricTensor(self.P)
+        # if do_checks_P:
+        #     utils.checkNonZeroTensor(self.P)
+        #     utils.checkSymmetricTensor(self.P)
 
-            # eigenvalues = np.linalg.eigvalsh(self.P)
-            # smallest_eigenvalue = np.amin(eigenvalues)
+        # eigenvalues = np.linalg.eigvalsh(self.P)
+        # smallest_eigenvalue = np.amin(eigenvalues)
 
-            ######## Check that the matrix is PSD up to a tolerance
-            # tol = 1e-7
-            # utils.verify(
-            #     smallest_eigenvalue > -tol,
-            #     f"Matrix P is not PSD, smallest eigenvalue is {smallest_eigenvalue}",
-            # )
-            #########################
+        ######## Check that the matrix is PSD up to a tolerance
+        # tol = 1e-7
+        # utils.verify(
+        #     smallest_eigenvalue > -tol,
+        #     f"Matrix P is not PSD, smallest eigenvalue is {smallest_eigenvalue}",
+        # )
+        #########################
 
-            # Note: All the code assummes that P is a PSD matrix. This is specially important when:
-            # --> Using  cp.quad_form(...) You can use the argument assume_PSD=True (see https://github.com/cvxpy/cvxpy/issues/407)
-            # --> Computting kappa (if P is not a PSD matrix, you end up with a negative discriminant when solving the 2nd order equation)
+        # Note: All the code assummes that P is a PSD matrix. This is specially important when:
+        # --> Using  cp.quad_form(...) You can use the argument assume_PSD=True (see https://github.com/cvxpy/cvxpy/issues/407)
+        # --> Computting kappa (if P is not a PSD matrix, you end up with a negative discriminant when solving the 2nd order equation)
 
-            ######### Correct for possible numerical errors
-            # if (-tol) <= smallest_eigenvalue < 0:
-            #     # Correction due to numerical errors
+        ######### Correct for possible numerical errors
+        # if (-tol) <= smallest_eigenvalue < 0:
+        #     # Correction due to numerical errors
 
-            #     ##Option 1
-            #     self.P = self.P + np.abs(smallest_eigenvalue) * np.eye(self.P.shape[0])
+        #     ##Option 1
+        #     self.P = self.P + np.abs(smallest_eigenvalue) * np.eye(self.P.shape[0])
 
-            ##Option 2 https://stackoverflow.com/a/63131250  and https://math.stackexchange.com/a/1380345
-            # C = (self.P + self.P.T)/2  #https://en.wikipedia.org/wiki/Symmetric_matrix#Decomposition_into_symmetric_and_skew-symmetric
-            # eigval, eigvec = np.linalg.eigh(C)
-            # eigval[eigval < 0] = 0
-            # self.P=eigvec.dot(np.diag(eigval)).dot(eigvec.T)
-            ##########
+        ##Option 2 https://stackoverflow.com/a/63131250  and https://math.stackexchange.com/a/1380345
+        # C = (self.P + self.P.T)/2  #https://en.wikipedia.org/wiki/Symmetric_matrix#Decomposition_into_symmetric_and_skew-symmetric
+        # eigval, eigvec = np.linalg.eigh(C)
+        # eigval[eigval < 0] = 0
+        # self.P=eigvec.dot(np.diag(eigval)).dot(eigvec.T)
+        ##########
 
     def getDim(self):
+        # Within batch
         if self.P.nelement() > 0:
             self.dim = self.P.shape[2]
         return self.dim
 
+    def at(self, i):
+        # Within sample
+        return range(i * self.num, (i + 1) * self.num)
+
     def asCvxpy(self, y, P_sqrt, q, r, epsilon=0.0):
+        # Within sample, one constraint
         return [
             0.5 * cp.sum_squares(P_sqrt @ y) + q.T @ y + r <= -epsilon
         ]  # assume_PSD needs to be True because of this: https://github.com/cvxpy/cvxpy/issues/407. We have already checked that it is Psd within a tolerance
@@ -137,11 +148,19 @@ class ConvexQuadraticConstraint:
 class ConvexConstraints:
     def __init__(
         self,
+        num_cstr=None,
         do_preprocessing_linear=False,
         print_debug_info=False,
     ):
-        self.lc = LinearConstraint()
-        self.qcs = ConvexQuadraticConstraint()
+        self.num_lineq = num_cstr[0]  # number of linear inequalities
+        self.num_leq = num_cstr[1]  # number of linear equalities
+        self.num_qc = num_cstr[2]  # number of convex quadratic constraints
+        self.num_soc = num_cstr[3]  # number of SOC constraints
+        self.num_lmi = num_cstr[4]  # number of LMI constraints
+
+        self.lc = LinearConstraints()
+        self.qcs = ConvexQuadraticConstraints(num=self.num_qc)
+
         # self.socs = SocConstraint()
         # self.lmis = LmiConstraint()
 
