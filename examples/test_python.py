@@ -136,9 +136,10 @@ torch.set_default_tensor_type(
 # print("\nPseudo-inverse of A:")
 # print(A_pinv)
 
-# A = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+A = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+B = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
 # A1 = torch.flatten(A, 0).unsqueeze(-1)
 # print(A1)
 
-A = torch.tensor([[[1.0, 2.0], [2.0, 1.0]]])
-print(A * 1.0)
+AB = torch.cat((A, B), dim=1)
+print(AB)

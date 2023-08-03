@@ -70,8 +70,10 @@ class LinearConstraint:
             constraints.append(self.A1 @ y <= self.b1)
         if self.hasEqConstraints():
             constraints.append(self.A2 @ y == self.b2)
-
         return constraints
+
+    def asCvxpySubspace(self, z, A_p, b_p, epsilon=0.0):
+        return [A_p @ z - b_p <= -epsilon * torch.ones((A_p.shape[0], 1))]
 
 
 class ConvexQuadraticConstraint:
@@ -126,9 +128,9 @@ class ConvexQuadraticConstraint:
             self.dim = self.P.shape[2]
         return self.dim
 
-    def asCvxpy(self, y, P, q, r, epsilon=0.0):
+    def asCvxpy(self, y, P_sqrt, q, r, epsilon=0.0):
         return [
-            0.5 * cp.sum_squares(P @ y) + q.T @ y + r <= -epsilon
+            0.5 * cp.sum_squares(P_sqrt @ y) + q.T @ y + r <= -epsilon
         ]  # assume_PSD needs to be True because of this: https://github.com/cvxpy/cvxpy/issues/407. We have already checked that it is Psd within a tolerance
 
 

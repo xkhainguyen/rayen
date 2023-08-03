@@ -17,12 +17,23 @@ from . import constraints_torch
 
 
 class ConstraintModule(torch.nn.Module):
+    """Description:
+    Args:
+     xv_dim: dimension of step input sample
+     xc_dim: dimension of constraint input sample
+     y_dim: dimension of output, ambient space
+     method: method to use
+     num_cstr: number of each type of constraints
+     args_DC3: arguments for DC3
+    """
+
     def __init__(
         self,
         xv_dim=None,
         xc_dim=None,
         y_dim=None,
         method="RAYEN",
+        num_cstr=None,
         constraintInputMap=None,
         args_DC3=None,
     ):
@@ -35,6 +46,7 @@ class ConstraintModule(torch.nn.Module):
         self.n = None  # Dimension of the embedded space (determined later)
         self.batch_size = None
         self.constraintInputMap = constraintInputMap
+        self.num_cstr = num_cstr
 
         # Pass dummy input to check the constraintInputMap users provide
         self.cs = constraints_torch.ConvexConstraints()
@@ -50,6 +62,7 @@ class ConstraintModule(torch.nn.Module):
         ) = torch.vmap(self.constraintInputMap)(temp_x)
 
         self.cs.firstInit()
+
         # Get the dimension of all potential linear constraints stacked together
         if self.cs.has_linear_constraints:
             self.Ap_nrows = self.cs.lc.A1.shape[1]
@@ -91,24 +104,8 @@ class ConstraintModule(torch.nn.Module):
         else:
             # There are more solvers, see https://www.cvxpy.org/tutorial/advanced/index.html#choosing-a-solver
             raise Exception(f"Which solver do you have installed?")
-            # Mapper does nothing
-        self.solver = "SCS"
+        self.solver = "ECOS"
         return True
-
-    def solveSecondOrderEq(self, a, b, c, is_quad_constraint):
-        discriminant = torch.square(b) - 4 * (a) * (c)
-
-        assert torch.all(
-            discriminant >= 0
-        ), f"Smallest element is {torch.min(discriminant)}"
-        sol1 = torch.div(
-            -(b) - torch.sqrt(discriminant), 2 * a
-        )  # note that for quad constraints the positive solution has the minus: (... - sqrt(...))/(...)
-        if is_quad_constraint:
-            return sol1
-        else:
-            sol2 = torch.div(-(b) + torch.sqrt(discriminant), 2 * a)
-            return torch.relu(torch.maximum(sol1, sol2))
 
     def computeKappa(self, v_bar):
         kappa = torch.relu(torch.max(self.D @ v_bar, dim=1, keepdim=True).values)
@@ -355,7 +352,7 @@ class ConstraintModule(torch.nn.Module):
             self.n = self.k
             NA_E = torch.eye(self.n).unsqueeze(0).repeat(self.batch_size, 1, 1)
             # print(NA_E)
-            yp = torch.zeros(self.batch_size, self.n, 1)
+            yp = torch.zeros(self.batch_size, self.k, 1)
             # print(yp)
             # 0z<=1
             A_p = torch.zeros(self.batch_size, 1, self.n)
@@ -396,13 +393,11 @@ class ConstraintModule(torch.nn.Module):
         return True
 
     def getConstraintsInSubspaceCvxpy(
-        self, z, y, NA_E, yp, A_p, b_p, P, q, r, epsilon=0.0
+        self, z, y, NA_E, yp, A_p, b_p, P_sqrt, q, r, epsilon=0.0
     ):
-        constraints = [A_p @ z - b_p <= -epsilon * torch.ones((self.Ap_nrows, 1))]
+        constraints = self.cs.lc.asCvxpySubspace(z, A_p, b_p, epsilon)
         constraints += [y == NA_E @ z + yp]
-
-        # constraints += self.cs.qcs.asCvxpy(y, P, q, r, epsilon)
-        constraints += [0.5 * cp.sum_squares(P @ y) + q.T @ y + r <= -epsilon]
+        constraints += self.cs.qcs.asCvxpy(y, P_sqrt, q, r, epsilon)
         return constraints
 
     # Setup interior point problem beforehand
@@ -416,11 +411,11 @@ class ConstraintModule(torch.nn.Module):
         NA_E = cp.Parameter((self.k, self.n))
         A_p = cp.Parameter((self.Ap_nrows, self.n))
         b_p = cp.Parameter((self.Ap_nrows, 1))
-        P = cp.Parameter((self.n, self.n))
+        P_sqrt = cp.Parameter((self.n, self.n))
         q = cp.Parameter((self.n, 1))
         r = cp.Parameter((1, 1))
         self.ip_constraints = self.getConstraintsInSubspaceCvxpy(
-            self.ip_z0, self.ip_y, NA_E, yp, A_p, b_p, P, q, r, self.ip_epsilon
+            self.ip_z0, self.ip_y, NA_E, yp, A_p, b_p, P_sqrt, q, r, self.ip_epsilon
         )
         # print(self.ip_constraints)
         self.ip_constraints.append(self.ip_epsilon >= 0)
@@ -434,7 +429,7 @@ class ConstraintModule(torch.nn.Module):
         assert self.ip_prob.is_dpp()
         self.ip_layer = CvxpyLayer(
             self.ip_prob,
-            parameters=[NA_E, yp, A_p, b_p, P, q, r],
+            parameters=[NA_E, yp, A_p, b_p, P_sqrt, q, r],
             variables=[self.ip_z0, self.ip_epsilon, self.ip_y],
         )
 
@@ -451,13 +446,16 @@ class ConstraintModule(torch.nn.Module):
         # )
         # print(f"self.A_p = {self.A_p}")
         # print(f"self.b_p = {self.b_p}")
+        # print(f"P = {self.cs.qcs.P}")
+        # print(f"q = {self.cs.qcs.q}")
+        # print(f"r = {self.cs.qcs.r}")
 
         ip_z0, ip_epsilon, ip_y = self.ip_layer(
             self.NA_E,
             self.yp,
             self.A_p,
             self.b_p,
-            self.cs.qcs.P,
+            torch.linalg.cholesky(self.cs.qcs.P),
             self.cs.qcs.q,
             self.cs.qcs.r,
             solver_args={"solve_method": self.solver},

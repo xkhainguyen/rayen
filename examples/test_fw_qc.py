@@ -59,13 +59,23 @@ def constraintInputMap(x):
     b2 = torch.tensor([])
 
     # Quadratic constraints
-    # P is actually sqrt(P)
-    r = 0.5  # FIXME why does this need origin for IP = 0
-    c = x
-    E = (1 / (r * r)) * torch.eye(2)
-    P = 2 * E
-    q = -2 * E @ c
-    r = c.transpose(-1, -2) @ E @ c - 1
+    r1 = 1.0
+    c1 = x
+    E1 = (1 / (r1 * r1)) * torch.eye(2)
+    P1 = 2 * E1
+    q1 = -2 * E1 @ c1
+    r1 = c1.transpose(-1, -2) @ E1 @ c1 - 1
+
+    r2 = 1.0
+    c2 = x * 0.9
+    E2 = (1 / (r2 * r2)) * torch.eye(2)
+    P2 = 2 * E2
+    q2 = -2 * E2 @ c2
+    r2 = c2.transpose(-1, -2) @ E2 @ c2 - 1
+
+    P = torch.cat((P1, P2), dim=0)
+    q = torch.cat((q1, q2), dim=0)
+    r = torch.cat((r1, r2), dim=0)
 
     return A1, b1, A2, b2, P, q, r
 
@@ -95,8 +105,9 @@ def constraintInputMap(x):
 
 y_dim = 2
 xc_dim = 2
+num_cstr = [0, 0, 2, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
 my_layer = constraint_module.ConstraintModule(
-    2, xc_dim, y_dim, method=method, constraintInputMap=constraintInputMap
+    2, xc_dim, y_dim, method=method, num_cstr, constraintInputMap=constraintInputMap
 )
 
 num_cstr_samples = 1
@@ -119,7 +130,7 @@ for i in range(num_cstr_samples):
 
     # Define constraint input tensor
     # xc = torch.Tensor(xc_dim, 1).uniform_(1, 3)
-    xc = torch.tensor([[0.1], [-0.5]])
+    xc = torch.tensor([[10.0], [10.0]])  # FIXME why does this need origin for IP = 0
     xc_batched = xc.unsqueeze(0).repeat(num_samples, 1, 1)
     x_batched = torch.cat((xv_batched, xc_batched), 1)
 
