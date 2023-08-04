@@ -6,7 +6,8 @@ from scipy.linalg import null_space
 import utils_examples
 
 import fixpath  # Following this example: https://github.com/tartley/colorama/blob/master/demos/demo01.py
-from rayen import utils, constraint_module, constraints_torch
+
+# from rayen import utils, constraint_module, constraints_torch
 
 
 torch.set_default_dtype(torch.float64)
@@ -141,9 +142,8 @@ torch.set_default_tensor_type(
 # P_sqrt = [A[:, i : i + 2, :] for i in range(2)]
 # print(P_sqrt)
 
-A1 = torch.eye(3)
-P1_sqrt = torch.sqrt(A1)
-A2 = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]])
-P2_sqrt = torch.sqrt(A2)
-P = torch.cat((P1_sqrt, P2_sqrt), dim=0)
-print(P)
+A = [1, 2, 3]
+B = [4, 5]
+A.extend([B, B])
+(a, b, *_) = A
+print(a)

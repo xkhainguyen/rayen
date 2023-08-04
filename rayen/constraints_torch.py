@@ -142,9 +142,80 @@ class ConvexQuadraticConstraints:
 
     def asCvxpy(self, y, P_sqrt, q, r, epsilon=0.0):
         # Within sample, one constraint
-        return [
-            0.5 * cp.sum_squares(P_sqrt @ y) + q.T @ y + r <= -epsilon
-        ]  # assume_PSD needs to be True because of this: https://github.com/cvxpy/cvxpy/issues/407. We have already checked that it is Psd within a tolerance
+
+        # assume_PSD needs to be True because of this: https://github.com/cvxpy/cvxpy/issues/407. We have already checked that it is Psd within a tolerance
+        return [0.5 * cp.sum_squares(P_sqrt @ y) + q.T @ y + r <= -epsilon]
+
+
+class SocConstraint:
+    # Constraint is ||My+s||<=c'y+d
+    def __init__(
+        self,
+        M=torch.tensor([]),
+        s=torch.tensor([]),
+        c=torch.tensor([]),
+        d=torch.tensor([]),
+        num=0,
+    ):
+        # utils.checkMatrixisNotZero(M)
+        # utils.checkMatrixisNotZero(c)
+
+        # utils.verify(M.shape[1] == c.shape[0])
+        # utils.verify(M.shape[0] == s.shape[0])
+        # utils.verify(s.shape[1] == 1)
+        # utils.verify(c.shape[1] == 1)
+        # utils.verify(d.shape[0] == 1)
+        # utils.verify(d.shape[1] == 1)
+
+        self.M = M
+        self.s = s
+        self.c = c
+        self.d = d
+        self.num = num
+        self.dim = 0
+
+    def getDim(self):
+        # Within batch
+        if self.M.nelement() > 0:
+            self.dim = self.M.shape[2]
+        return self.dim
+
+    def at(self, i):
+        # Within sample
+        return range(i * self.dim, (i + 1) * self.dim)
+
+    def asCvxpy(self, y, M, s, c, d, epsilon=0.0):
+        return [cp.norm(M @ y + s) - c.T @ y - d <= -epsilon]
+
+
+class LmiConstraint:
+    # Constraint is y0 F0 + y1 F1 + ... + ykm1 Fkm1 + Fk >=0
+    # Stack vertically F = [F0; F1; F2;...;Fk]
+    def __init__(self, F=torch.tensor([])):
+        self.F = F
+        self.dim = 0
+        self.Fdim = 0
+
+    def getDim(self):
+        # Within batch
+        if self.F.nelement() > 0:
+            self.Fdim = self.F.shape[2]
+            self.dim = self.F.shape[1] / self.Fdim - 1
+        return self.dim
+
+    def at(self, i):
+        # Within sample
+        return range(i * self.Fdim, (i + 1) * self.Fdim)
+
+    def asCvxpy(self, y, F, epsilon=0.0):
+        lmi_left_hand_side = 0
+        k = self.dim
+        for i in range(k):
+            idx = self.at(i)
+            lmi_left_hand_side += y[i, 0] * F[idx, :]
+        lmi_left_hand_side += F[self.at(k), :]
+
+        return [lmi_left_hand_side >> epsilon * torch.eye(self.Fdim)]
 
 
 class ConvexConstraints:
@@ -162,9 +233,8 @@ class ConvexConstraints:
 
         self.lc = LinearConstraints()
         self.qcs = ConvexQuadraticConstraints(num=self.num_qc)
-
-        # self.socs = SocConstraint()
-        # self.lmis = LmiConstraint()
+        self.socs = SocConstraint(num=self.num_soc)
+        self.lmis = LmiConstraint()
 
         self.has_linear_eq_constraints = False
         self.has_linear_ineq_constraints = False
@@ -183,8 +253,12 @@ class ConvexConstraints:
         )
         self.lc.getDim()
         self.qcs.getDim()
+        self.socs.getDim()
+        self.lmis.getDim()
 
         self.has_quadratic_constraints = self.qcs.dim > 0
+        self.has_soc_constraints = self.socs.dim > 0
+        self.has_lmi_constraints = self.lmis.dim > 0
         self.has_nonlinear_constraints = (
             self.has_quadratic_constraints
             or self.has_soc_constraints
@@ -207,9 +281,57 @@ class ConvexConstraints:
             all_dim.append(self.lc.dim)
         if self.has_quadratic_constraints:
             all_dim.append(self.qcs.dim)
+        if self.has_soc_constraints:
+            all_dim.append(self.socs.dim)
+        if self.has_lmi_constraints:
+            all_dim.append(self.lmis.dim)
 
         utils.verify(utils.all_equal(all_dim), "wrong constraint dimension")
-        utils.verify(
-            self.num_qc * self.qcs.dim == self.qcs.P.shape[1],
-            "wrong quadratic constraint number",
-        )
+
+        if self.has_quadratic_constraints:
+            utils.verify(
+                self.qcs.P.shape[1] == self.qcs.dim * self.qcs.num
+                and self.qcs.P.shape[2] == self.qcs.dim,
+                "wrong quadratic constraint P dimension",
+            )
+
+            utils.verify(
+                self.qcs.P_sqrt.shape[1] == self.qcs.dim * self.qcs.num
+                and self.qcs.P_sqrt.shape[2] == self.qcs.dim,
+                "wrong quadratic constraint P_sqrt dimension",
+            )
+
+            utils.verify(
+                self.qcs.q.shape[1] == self.qcs.dim * self.qcs.num
+                and self.qcs.q.shape[2] == 1,
+                "wrong quadratic constraint q dimension",
+            )
+
+            utils.verify(
+                self.qcs.r.shape[1] == self.qcs.num and self.qcs.r.shape[2] == 1,
+                "wrong quadratic constraint r dimension",
+            )
+
+        if self.has_soc_constraints:
+            utils.verify(
+                self.socs.M.shape[1] == self.socs.dim * self.socs.num
+                and self.socs.M.shape[2] == self.socs.dim,
+                "wrong SOC constraint M dimension",
+            )
+
+            utils.verify(
+                self.socs.s.shape[1] == self.socs.dim * self.socs.num
+                and self.socs.s.shape[2] == 1,
+                "wrong SOC constraint s dimension",
+            )
+
+            utils.verify(
+                self.socs.c.shape[1] == self.socs.dim * self.socs.num
+                and self.socs.c.shape[2] == 1,
+                "wrong SOC constraint c dimension",
+            )
+
+            utils.verify(
+                self.socs.d.shape[1] == self.socs.num and self.socs.d.shape[2] == 1,
+                "wrong SOC constraint d dimension",
+            )

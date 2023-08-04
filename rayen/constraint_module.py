@@ -48,18 +48,10 @@ class ConstraintModule(torch.nn.Module):
         self.constraintInputMap = constraintInputMap
 
         self.cs = constraints_torch.ConvexConstraints(num_cstr)
+        self.params_indexes = {"qc": None, "soc": None, "lmi": None}
+
         # Pass dummy input to check the constraintInputMap users provide
-        temp_x = torch.ones(1, xc_dim, 1)  # just a vector
-        (
-            self.cs.lc.A1,
-            self.cs.lc.b1,
-            self.cs.lc.A2,
-            self.cs.lc.b2,
-            self.cs.qcs.P,
-            self.cs.qcs.P_sqrt,
-            self.cs.qcs.q,
-            self.cs.qcs.r,
-        ) = torch.vmap(self.constraintInputMap)(temp_x)
+        self.test_dummy(xc_dim)
 
         self.cs.firstInit()
 
@@ -88,6 +80,24 @@ class ConstraintModule(torch.nn.Module):
             self.stepInputMap = nn.Linear(self.m, self.n)
         else:
             self.stepInputMap = nn.Sequential()
+
+    def test_dummy(self, xc_dim):
+        temp_x = torch.ones(1, xc_dim, 1)  # just a vector
+        (
+            self.cs.lc.A1,
+            self.cs.lc.b1,
+            self.cs.lc.A2,
+            self.cs.lc.b2,
+            self.cs.qcs.P,
+            self.cs.qcs.P_sqrt,
+            self.cs.qcs.q,
+            self.cs.qcs.r,
+            self.cs.socs.M,
+            self.cs.socs.s,
+            self.cs.socs.c,
+            self.cs.socs.d,
+            self.cs.lmis.F,
+        ) = torch.vmap(self.constraintInputMap)(temp_x)
 
     def selectSolver(self):
         installed_solvers = cp.installed_solvers()
@@ -286,17 +296,38 @@ class ConstraintModule(torch.nn.Module):
         # utils.verify(self.n == (self.k - np.linalg.matrix_rank(self.A_E[0])))
         return True
 
-    def getConstraintsInSubspaceCvxpy(
-        self, z, y, NA_E, yp, A_p, b_p, P_sqrt, q, r, epsilon=0.0
-    ):
+    def getConstraintsInSubspaceCvxpy(self, z, y, params=None, epsilon=0.0):
+        NA_E, yp, A_p, b_p, *_ = params
         constraints = self.cs.lc.asCvxpySubspace(z, A_p, b_p, epsilon)
+
         constraints += [y == NA_E @ z + yp]
-        for i in range(self.cs.num_qc):
-            idx = self.cs.qcs.at(i)
-            # print(f"idx = {idx}")
-            constraints += self.cs.qcs.asCvxpy(
-                y, P_sqrt[idx, :], q[idx, :], r[i], epsilon
-            )
+
+        if self.cs.has_quadratic_constraints:
+            cs_idx = self.params_indexes["qc"]
+            qc = params[cs_idx : cs_idx + 3]
+            for i in range(self.cs.num_qc):
+                idx = self.cs.qcs.at(i)
+                # print(f"idx = {idx}")
+                constraints += self.cs.qcs.asCvxpy(
+                    y, qc[0][idx, :], qc[1][idx, :], qc[2][i], epsilon
+                )
+
+        if self.cs.has_soc_constraints:
+            cs_idx = self.params_indexes["soc"]
+            # print(cs_idx)
+            soc = params[cs_idx : cs_idx + 4]
+            # print(soc)
+            for i in range(self.cs.num_soc):
+                idx = self.cs.socs.at(i)
+                # print(f"idx = {idx}")
+                constraints += self.cs.socs.asCvxpy(
+                    y,
+                    soc[0][idx, :],
+                    soc[1][idx, :],
+                    soc[2][idx, :],
+                    soc[3][i],
+                    epsilon,
+                )
         return constraints
 
     # Setup interior point problem beforehand
@@ -306,16 +337,38 @@ class ConstraintModule(torch.nn.Module):
         self.ip_y = cp.Variable((self.k, 1))
 
         # self.ip_constraints = cp.Parameter((X, 1))  # need size
-        yp = cp.Parameter((self.k, 1))
         NA_E = cp.Parameter((self.k, self.n))
+        yp = cp.Parameter((self.k, 1))
+
         A_p = cp.Parameter((self.Ap_nrows, self.n))
         b_p = cp.Parameter((self.Ap_nrows, 1))
-        P_sqrt = cp.Parameter((self.n * self.cs.num_qc, self.n))
-        q = cp.Parameter((self.n * self.cs.num_qc, 1))
-        r = cp.Parameter((self.cs.num_qc, 1))
+
+        params = [NA_E, yp, A_p, b_p]
+
+        if self.cs.has_quadratic_constraints:
+            # print("QC")
+            P_sqrt = cp.Parameter((self.n * self.cs.num_qc, self.n))
+            q = cp.Parameter((self.n * self.cs.num_qc, 1))
+            r = cp.Parameter((self.cs.num_qc, 1))
+            self.params_indexes["qc"] = len(params)
+            params += [P_sqrt, q, r]
+
+        if self.cs.has_soc_constraints:
+            # print("SOC")
+            M = cp.Parameter((self.n * self.cs.num_soc, self.n))
+            s = cp.Parameter((self.n * self.cs.num_soc, 1))
+            c = cp.Parameter((self.n * self.cs.num_soc, 1))
+            d = cp.Parameter((self.cs.num_soc, 1))
+            self.params_indexes["soc"] = len(params)
+            params += [M, s, c, d]
+
         self.ip_constraints = self.getConstraintsInSubspaceCvxpy(
-            self.ip_z0, self.ip_y, NA_E, yp, A_p, b_p, P_sqrt, q, r, self.ip_epsilon
+            self.ip_z0,
+            self.ip_y,
+            params=params,
+            epsilon=self.ip_epsilon,
         )
+
         # print(self.ip_constraints)
         self.ip_constraints.append(self.ip_epsilon >= 0)
         self.ip_constraints.append(
@@ -328,7 +381,7 @@ class ConstraintModule(torch.nn.Module):
         assert self.ip_prob.is_dpp()
         self.ip_layer = CvxpyLayer(
             self.ip_prob,
-            parameters=[NA_E, yp, A_p, b_p, P_sqrt, q, r],
+            parameters=params,
             variables=[self.ip_z0, self.ip_epsilon, self.ip_y],
         )
 
@@ -348,15 +401,16 @@ class ConstraintModule(torch.nn.Module):
         # print(f"P = {self.cs.qcs.P}")
         # print(f"q = {self.cs.qcs.q}")
         # print(f"r = {self.cs.qcs.r}")
+        params = [self.NA_E, self.yp, self.A_p, self.b_p]
+        if self.cs.has_quadratic_constraints:
+            # print("QC")
+            params += [self.cs.qcs.P_sqrt, self.cs.qcs.q, self.cs.qcs.r]
+        if self.cs.has_soc_constraints:
+            # print("SOC")
+            params += [self.cs.socs.M, self.cs.socs.s, self.cs.socs.c, self.cs.socs.d]
 
         ip_z0, ip_epsilon, ip_y = self.ip_layer(
-            self.NA_E,
-            self.yp,
-            self.A_p,
-            self.b_p,
-            self.cs.qcs.P_sqrt,
-            self.cs.qcs.q,
-            self.cs.qcs.r,
+            *params,
             solver_args={"solve_method": self.solver},
         )  # "max_iters": 10000
         # print(f"epsilon = {ip_epsilon}")
@@ -410,29 +464,31 @@ class ConstraintModule(torch.nn.Module):
                     (all_kappas_positives, kappa_positive_i), dim=1
                 )
 
-                #     for i in range(self.all_M.shape[0]):  # for each of the SOC constraints
-                #         M = self.all_M[i, :, :]
-                #         s = self.all_s[i, :, :]
-                #         c = self.all_c[i, :, :]
-                #         d = self.all_d[i, :, :]
+            for i in range(self.cs.num_soc):  # for each of the SOC constraints
+                idx = self.cs.socs.at(i)
+                M = self.cs.socs.M[:, idx, :]
+                s = self.cs.socs.s[:, idx, :]
+                c = self.cs.socs.c[:, idx, :]
+                d = self.cs.socs.d[:, i : i + 1, :]
+                cT = c.transpose(-1, -2)
 
-                #         beta = M @ self.y0 + s
-                #         tau = c.T @ self.y0 + d
+                beta = M @ self.y0 + s
+                tau = cT @ self.y0 + d
 
-                #         c_prime = rhoT @ M.T @ M @ rho - torch.square(c.T @ rho)
-                #         b_prime = 2 * rhoT @ M.T @ beta - 2 * (c.T @ rho) @ tau
-                #         a_prime = beta.T @ beta - torch.square(tau)
+                c_prime = rhoT @ M.transpose(-1, -2) @ M @ rho - torch.square(cT @ rho)
+                b_prime = 2 * rhoT @ M.transpose(-1, -2) @ beta - 2 * (cT @ rho) @ tau
+                a_prime = beta.transpose(-1, -2) @ beta - torch.square(tau)
 
-                #         kappa_positive_i = self.solveSecondOrderEq(
-                #             a_prime, b_prime, c_prime, False
-                #         )
+                kappa_positive_i = self.solveSecondOrderEq(
+                    a_prime, b_prime, c_prime, False
+                )
 
-                #         assert torch.all(
-                #             kappa_positive_i >= 0
-                #         )  # If not, then either the feasible set is infeasible (note that z0 is inside the feasible set)
-                #         all_kappas_positives = torch.cat(
-                #             (all_kappas_positives, kappa_positive_i), dim=1
-                #         )
+                assert torch.all(
+                    kappa_positive_i >= 0
+                )  # If not, then either the feasible set is infeasible (note that z0 is inside the feasible set)
+                all_kappas_positives = torch.cat(
+                    (all_kappas_positives, kappa_positive_i), dim=1
+                )
 
                 #     if len(self.all_F) > 0:  # If there are LMI constraints:
                 #         ############# OBTAIN S
@@ -543,6 +599,11 @@ class ConstraintModule(torch.nn.Module):
             self.cs.qcs.P_sqrt,
             self.cs.qcs.q,
             self.cs.qcs.r,
+            self.cs.socs.M,
+            self.cs.socs.s,
+            self.cs.socs.c,
+            self.cs.socs.d,
+            self.cs.lmis.F,
         ) = torch.vmap(self.constraintInputMap)(xc)
         ####################################################
 
@@ -564,6 +625,21 @@ class ConstraintModule(torch.nn.Module):
     def getzFromy(self, y):
         z = self.NA_E.T @ (y - self.yp)
         return z
+
+    def solveSecondOrderEq(self, a, b, c, is_quad_constraint):
+        discriminant = torch.square(b) - 4 * (a) * (c)
+
+        assert torch.all(
+            discriminant >= 0
+        ), f"Smallest element is {torch.min(discriminant)}"
+        sol1 = torch.div(
+            -(b) - torch.sqrt(discriminant), 2 * a
+        )  # note that for quad constraints the positive solution has the minus: (... - sqrt(...))/(...)
+        if is_quad_constraint:
+            return sol1
+        else:
+            sol2 = torch.div(-(b) + torch.sqrt(discriminant), 2 * a)
+            return torch.relu(torch.maximum(sol1, sol2))
 
     # def stackCholesky(self, A):
     #     output = torch.empty((0, self.k))

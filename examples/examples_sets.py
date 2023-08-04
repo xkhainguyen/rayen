@@ -147,7 +147,7 @@ def getExample(example):
         b2 = np.array([[1.0]])
         lc = constraints.LinearConstraint(None, None, A2, b2)
 
-    elif example == 10:  # A paraboloid and a shpere
+    elif example == 10:  # A paraboloid and a sphere
         qcs.append(getParaboloid3DConstraint())
         qcs.append(getSphereConstraint(2.0, np.zeros((3, 1))))
 
