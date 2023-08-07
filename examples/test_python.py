@@ -142,8 +142,6 @@ torch.set_default_tensor_type(
 # P_sqrt = [A[:, i : i + 2, :] for i in range(2)]
 # print(P_sqrt)
 
-A = [1, 2, 3]
-B = [4, 5]
-A.extend([B, B])
-(a, b, *_) = A
-print(a)
+A = torch.tensor([[[3], [4], [0.0]], [[1], [2], [4]]])
+n = torch.linalg.norm(A, dim=1)
+print(n)

@@ -32,7 +32,7 @@ torch.set_default_dtype(torch.float64)
 
 method = "RAYEN"
 
-example_number = 14
+example_number = 13
 example = RppExample(example_number)
 
 my_layer = constraint_module.ConstraintModule(
@@ -55,10 +55,10 @@ for i in range(num_cstr_samples):
     num_samples = 500
 
     # Define step input tensor
-    xv_batched_x = torch.Tensor(num_samples, 1, 1).uniform_(-2, 2) * 5
-    xv_batched_y = torch.Tensor(num_samples, 1, 1).uniform_(-2, 2) * 5
+    xv_batched_x = torch.Tensor(num_samples, 1, 1).uniform_(-2, 2) * 150
+    xv_batched_y = torch.Tensor(num_samples, 1, 1).uniform_(-2, 2) * 150
     if example.xv_dim == 3:
-        xv_batched_z = torch.Tensor(num_samples, 1, 1).uniform_(-2, 2) * 5
+        xv_batched_z = torch.Tensor(num_samples, 1, 1).uniform_(-2, 2) * 150
         xv_batched = torch.cat((xv_batched_x, xv_batched_y, xv_batched_z), 1)
     if example.xv_dim == 2:
         xv_batched = torch.cat((xv_batched_x, xv_batched_y), 1)
@@ -85,6 +85,9 @@ for i in range(num_cstr_samples):
     result = my_layer(x_batched)
     total_time_per_sample = (time.time() - time_start) / num_samples
 
+    # print(f"result = {result}")
+    my_layer.isFeasible(result, 1e-8)
+
     result = result.detach().numpy()
 
     y0 = my_layer.gety0()
@@ -107,19 +110,5 @@ for i in range(num_cstr_samples):
     if example.y_dim == 3:
         ax.scatter(y0[0, 0, 0], y0[0, 1, 0], y0[0, 2, 0], color="r", s=100)
         ax.scatter(result[:, 0, 0], result[:, 1, 0], result[:, 2, 0])
-
-# my_dict = constraint.getDataAsDict()
-# my_dict["result"] = result
-# my_dict["total_time_per_sample"] = total_time_per_sample
-# my_dict["y0"] = constraint.y0
-# my_dict["v"] = v_batched.detach().numpy()
-# directory = "./first_figure"
-# if not os.path.exists(directory):
-#     os.makedirs(directory)
-# scipy.io.savemat(directory + "/first_figure.mat", my_dict)
-
-# utils.printInBoldBlue(
-#     f"Example {index_example}, total_time_per_sample={total_time_per_sample}"
-# )
 
 plt.show()

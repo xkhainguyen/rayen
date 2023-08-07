@@ -200,7 +200,7 @@ class LmiConstraint:
         # Within batch
         if self.F.nelement() > 0:
             self.Fdim = self.F.shape[2]
-            self.dim = self.F.shape[1] / self.Fdim - 1
+            self.dim = int(self.F.shape[1] / self.Fdim) - 1
         return self.dim
 
     def at(self, i):

@@ -75,6 +75,22 @@ class RppExample:
             self.num_cstr = [0, 0, 1, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
             self.constraintInputMap = self.exampleMap14
 
+        elif self.example == 12:  # The PSD cone in 3D
+            self.name = "PSD cone in 3D"
+            self.xv_dim = 3
+            self.xc_dim = 1
+            self.y_dim = 3
+            self.num_cstr = [0, 0, 0, 0, 1]  # linear ineq, linear eq, qcs, socs, lmis
+            self.constraintInputMap = self.exampleMap12
+
+        elif self.example == 13:  # Polyhedron, Ellipsoid, SOC, PSD
+            self.name = "Polyhedron, Ellipsoid, SOC, PSD"
+            self.xv_dim = 3
+            self.xc_dim = 3
+            self.y_dim = 3
+            self.num_cstr = [0, 0, 1, 1, 1]  # linear ineq, linear eq, qcs, socs, lmis
+            self.constraintInputMap = self.exampleMap13
+
     def exampleMap2(self, x):  # Just a sphere
         A1, b1, A2, b2 = getNoneLinearConstraints()
 
@@ -146,7 +162,7 @@ class RppExample:
     def exampleMap11(self, x):  # A second-order cone
         A1, b1, A2, b2 = getNoneLinearConstraints()
         P, P_sqrt, q, r = getNoneQuadraticConstraints()
-        M, s, c, d = getSOC3DConstraint(x)
+        M, s, c, d = getSOC3DConstraint()
         F = getNoneLmiConstraints()
         return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d, F
 
@@ -158,6 +174,23 @@ class RppExample:
         P, P_sqrt, q, r = getEllipsoidConstraint(E_ellipsoid, torch.zeros((3, 1)))
         M, s, c, d = getNoneSocConstraints()
         F = getNoneLmiConstraints()
+        return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d, F
+
+    def exampleMap12(self, x=None):  # PSD cone
+        A1, b1, A2, b2 = getNoneLinearConstraints()
+        P, P_sqrt, q, r = getNoneQuadraticConstraints()
+        M, s, c, d = getNoneSocConstraints()
+        F = getPSDCone3DConstraint(x)
+        return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d, F
+
+    def exampleMap13(self, x):  # Polyhedron and Ellipsoid
+        A1 = torch.tensor([[-1.0, -1.0, -1.0]])
+        b1 = torch.tensor([[-1.0]])
+        A2, b2 = getEmpty(), getEmpty()
+        E_ellipsoid = torch.tensor([[0.1, 0, 0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        P, P_sqrt, q, r = getEllipsoidConstraint(E_ellipsoid, torch.zeros((3, 1)))
+        M, s, c, d = getSOC3DConstraint()
+        F = getPSDCone3DConstraint()
         return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d, F
 
 
@@ -213,7 +246,7 @@ def getSphereConstraint(r, c):
 
 
 def getParaboloid3DConstraint(x=None):
-    if x == None:
+    if x is None:
         P = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]])
         P_sqrt = torch.sqrt(P)
         q = torch.tensor([[0.0], [0.0], [-1.0]])
@@ -226,8 +259,8 @@ def getParaboloid3DConstraint(x=None):
     return P, P_sqrt, q, r
 
 
-def getSOC3DConstraint(x):
-    if x == None:
+def getSOC3DConstraint(x=None):
+    if x is None:
         M = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]])
         s = torch.tensor([[0.0], [0.0], [0.0]])
         c = torch.tensor([[0.0], [0.0], [1.0]])
@@ -240,333 +273,18 @@ def getSOC3DConstraint(x):
     return M, s, c, d
 
 
-def getPSDCone3DConstraint():
+def getPSDCone3DConstraint(x=None):
     # [x y;y z] >> 0
-    F0 = torch.tensor([[1.0, 0.0], [0.0, 0.0]])
 
-    F1 = torch.tensor([[0.0, 1.0], [1.0, 0.0]])
-
-    F2 = torch.tensor([[0.0, 0.0], [0.0, 1.0]])
-
-    F3 = torch.tensor([[0.0, 0.0], [0.0, 0.0]])
-
-    return [F0, F1, F2, F3]
-
-
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-
-#     # Linear constraints
-#     A1 = torch.tensor([])
-#     b1 = torch.tensor([])
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-
-#     # Quadratic constraints
-#     r2 = 2.0
-#     c2 = torch.zeros(3, 1)
-#     E2 = torch.tensor([[1, 0, 0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-#     P2 = 2 * E2
-#     q2 = -2 * E2 @ c2
-#     r2 = c2.transpose(-1, -2) @ E2 @ c2 - 1
-
-#     # SOC
-#     M = torch.tensor([])
-#     s = torch.tensor([])
-#     c = torch.tensor([])
-#     d = torch.tensor([])
-
-#     P = P2
-#     P_sqrt = torch.sqrt(P)
-#     q = q2
-#     r = r2
-#     return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d()
-
-
-# # Just a sphere
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-
-#     # Linear constraints
-#     A1 = torch.tensor([])
-#     b1 = torch.tensor([])
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-
-#     # Quadratic constraints
-#     r2 = 2.0
-#     c2 = torch.zeros(3, 1)
-#     E2 = torch.tensor([[1, 0, 0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-#     P2 = 2 * E2
-#     q2 = -2 * E2 @ c2
-#     r2 = c2.transpose(-1, -2) @ E2 @ c2 - 1
-
-#     # SOC
-#     M = torch.tensor([])
-#     s = torch.tensor([])
-#     c = torch.tensor([])
-#     d = torch.tensor([])
-
-#     P = P2
-#     P_sqrt = torch.sqrt(P)
-#     q = q2
-#     r = r2
-#     return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d
-
-
-# # Just a box with changing width
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-#     A1 = torch.tensor(
-#         [
-#             [1.0, 0, 0],
-#             [0, 1.0, 0],
-#             [0, 0, 1.0],
-#             [-1.0, 0, 0],
-#             [0, -1.0, 0],
-#             [0, 0, -1.0],
-#         ]
-#     )
-#     b1 = torch.tensor([[1.0], [1.0], [1.0], [0], [0], [0]]) @ x
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-#     # A2 = torch.tensor([[1.0, 1.0, 1.0]])
-#     # b2 = x[0, 0:1].unsqueeze(dim=1)
-#     return A1, b1, A2, b2
-
-
-# # Two circles with changing centers
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-
-#     # Linear constraints
-#     A1 = torch.tensor([])
-#     b1 = torch.tensor([])
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-
-#     # Quadratic constraints
-#     r1 = 2.0
-#     c1 = x
-#     E1 = (1 / (r1 * r1)) * torch.eye(2)
-#     P1 = 2 * E1
-#     q1 = -2 * E1 @ c1
-#     r1 = c1.transpose(-1, -2) @ E1 @ c1 - 1
-
-#     r2 = 2.0
-#     c2 = x * 0.9
-#     E2 = (1 / (r2 * r2)) * torch.eye(2)
-#     P2 = 2 * E2
-#     q2 = -2 * E2 @ c2
-#     r2 = c2.transpose(-1, -2) @ E2 @ c2 - 1
-
-#     P = torch.cat((P1, P2), dim=0)
-#     P_sqrt = torch.sqrt(P)
-#     q = torch.cat((q1, q2), dim=0)
-#     r = torch.cat((r1, r2), dim=0)
-
-#     # SOC
-#     M = torch.tensor([])
-#     s = torch.tensor([])
-#     c = torch.tensor([])
-#     d = torch.tensor([])
-
-#     return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d
-
-
-# # Just a sphere
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-
-#     # Linear constraints
-#     A1 = torch.tensor([])
-#     b1 = torch.tensor([])
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-
-#     # Quadratic constraints
-#     r2 = 2.0
-#     c2 = torch.zeros(3, 1)
-#     E2 = torch.tensor([[1, 0, 0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-#     P2 = 2 * E2
-#     q2 = -2 * E2 @ c2
-#     r2 = c2.transpose(-1, -2) @ E2 @ c2 - 1
-
-#     # SOC
-#     M = torch.tensor([])
-#     s = torch.tensor([])
-#     c = torch.tensor([])
-#     d = torch.tensor([])
-
-#     P = P2
-#     P_sqrt = torch.sqrt(P)
-#     q = q2
-#     r = r2
-#     return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d
-
-
-# # Paraboloid and Sphere
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-
-#     # Linear constraints
-#     A1 = torch.tensor([])
-#     b1 = torch.tensor([])
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-
-#     # Quadratic constraints
-#     # Paraboloid
-#     P1 = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]])
-#     P1_sqrt = torch.sqrt(P1)
-#     q1 = torch.tensor([[0.0], [0.0], [-1.0]])
-#     r1 = torch.tensor([[0.0]])
-
-#     # Sphere
-#     r2 = 2.0
-#     c2 = torch.zeros(3, 1) + 0.0 * x
-#     E2 = torch.tensor([[1, 0, 0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-#     P2 = 2 * E2
-#     q2 = -2 * E2 @ c2
-#     r2 = c2.transpose(-1, -2) @ E2 @ c2 - 1
-
-#     # SOC
-#     M = torch.tensor([])
-#     s = torch.tensor([])
-#     c = torch.tensor([])
-#     d = torch.tensor([])
-
-#     P = torch.cat((P1, P2), dim=0)
-#     P_sqrt = torch.sqrt(P)
-#     q = torch.cat((q1, q2), dim=0)
-#     r = torch.cat((r1, r2), dim=0)
-#     return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d
-
-
-# # Polyhedron and Ellipsoid
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-
-#     # Linear constraints
-#     A1 = torch.tensor([[-1.0, -1.0, -1.0], [-1.0, 2.0, 2.0]])
-#     b1 = torch.tensor([[-1.0], [1.0]])
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-
-#     # Quadratic constraints
-#     r1 = 1.0
-#     c1 = torch.zeros(3, 1) + 0.0 * x
-#     # print(f"x = {x}")
-#     E1 = torch.tensor([[0.1, 0, 0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-#     P1 = 2 * E1
-#     q1 = -2 * E1 @ c1
-#     r1 = c1.transpose(-1, -2) @ E1 @ c1 - 1
-
-#     P = P1
-#     P_sqrt = torch.sqrt(P)
-#     q = q1
-#     r = r1
-
-#     # SOC
-#     M = torch.tensor([])
-#     s = torch.tensor([])
-#     c = torch.tensor([])
-#     d = torch.tensor([])
-
-#     return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d
-
-
-# # Just a paraboloid
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-
-#     # Linear constraints
-#     A1 = torch.tensor([])
-#     b1 = torch.tensor([])
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-
-#     # Quadratic constraints
-#     P = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]])
-#     P_sqrt = torch.sqrt(P)
-#     q = torch.tensor([[0.0], [0.0], [-1.0]])
-#     r = torch.tensor([[0.0]]) + x
-
-#     # SOC
-#     M = torch.tensor([])
-#     s = torch.tensor([])
-#     c = torch.tensor([])
-#     d = torch.tensor([])
-
-#     return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d
-
-
-# # Paraboloid and Sphere
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-
-#     # Linear constraints
-#     A1 = torch.tensor([])
-#     b1 = torch.tensor([])
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-
-#     # Quadratic constraints
-#     # Paraboloid
-#     P1 = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]])
-#     P1_sqrt = torch.sqrt(P1)
-#     q1 = torch.tensor([[0.0], [0.0], [-1.0]])
-#     r1 = torch.tensor([[0.0]])
-
-#     # Sphere
-#     r2 = 2.0
-#     c2 = torch.zeros(3, 1) + 0.1 * x
-#     E2 = torch.tensor([[1, 0, 0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-#     P2 = 2 * E2
-#     q2 = -2 * E2 @ c2
-#     r2 = c2.transpose(-1, -2) @ E2 @ c2 - 1
-#     # SOC
-#     M = torch.tensor([])
-#     s = torch.tensor([])
-#     c = torch.tensor([])
-#     d = torch.tensor([])
-
-#     P = torch.cat((P1, P2), dim=0)
-#     P_sqrt = torch.sqrt(P)
-#     q = torch.cat((q1, q2), dim=0)
-#     r = torch.cat((r1, r2), dim=0)
-#     return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d
-
-
-# # SOC
-# def constraintInputMap(x):
-#     # x is a rank-2 tensor
-#     # outputs are rank-2 tensors
-
-#     # Linear constraints
-#     A1 = torch.tensor([])
-#     b1 = torch.tensor([])
-#     A2 = torch.tensor([])
-#     b2 = torch.tensor([])
-
-#     # Quadratic constraints
-#     P = torch.tensor([])
-#     P_sqrt = torch.tensor([])
-#     q = torch.tensor([])
-#     r = torch.tensor([])
-
-#     # SOC constraints
-#     M = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]])
-#     s = torch.tensor([[0.0], [0.0], [0.0]]) - x
-#     c = torch.tensor([[0.0], [0.0], [1.0]])
-#     d = torch.tensor([[0.0]])
-#     return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d
+    if x is None:
+        F0 = torch.tensor([[1.0, 0.0], [0.0, 0.0]])
+        F1 = torch.tensor([[0.0, 1.0], [1.0, 0.0]])
+        F2 = torch.tensor([[0.0, 0.0], [0.0, 1.0]])
+        F3 = torch.tensor([[0.0, 0.0], [0.0, 0.0]])
+    else:
+        F0 = torch.tensor([[1.0, 0.0], [0.0, 0.0]]) * x
+        F1 = torch.tensor([[0.0, 1.0], [1.0, 0.0]])
+        F2 = torch.tensor([[0.0, 0.0], [0.0, 1.0]])
+        F3 = torch.tensor([[0.0, 0.0], [0.0, 0.0]])
+    F = torch.cat((F0, F1, F2, F3), dim=0)
+    return F
