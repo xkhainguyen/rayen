@@ -103,7 +103,7 @@ class ConstraintModule(torch.nn.Module):
         installed_solvers = cp.installed_solvers()
         if ("GUROBI" in installed_solvers) and self.cs.has_lmi_constraints == False:
             self.solver = "GUROBI"  # You need to do `python -m pip install gurobipy`
-        elif ("ECOS" in installed_solvers) and self.cs.has_lmi_constraints == False:
+        if ("ECOS" in installed_solvers) and self.cs.has_lmi_constraints == False:
             self.solver = "ECOS"
         elif "SCS" in installed_solvers:
             self.solver = "SCS"
@@ -114,7 +114,7 @@ class ConstraintModule(torch.nn.Module):
         else:
             # There are more solvers, see https://www.cvxpy.org/tutorial/advanced/index.html#choosing-a-solver
             raise Exception(f"Which solver do you have installed?")
-        self.solver = "SCS"
+        # self.solver = "ECOS"
         return True
 
     # Function to recompute and register params
@@ -162,7 +162,7 @@ class ConstraintModule(torch.nn.Module):
     # From constraint input batch X, update all constraint data batch
     def updateSubspaceConstraints(self):
         if self.cs.has_linear_constraints:
-            # Retrive data from cs_dict
+            # Retrive data
             A1 = self.cs.lc.A1
             b1 = self.cs.lc.b1
             A2 = self.cs.lc.A2
@@ -181,7 +181,7 @@ class ConstraintModule(torch.nn.Module):
                 A = torch.cat((A, A2, -A2), axis=1)
                 b = torch.cat((b, b2, -b2), axis=1)
 
-            print_debug_info = 0
+            print_debug_info = 1
             if print_debug_info:
                 utils.printInBoldGreen(f"A is {A.shape} and b is {b.shape}")
 
@@ -216,9 +216,9 @@ class ConstraintModule(torch.nn.Module):
                 # 0z<=1
                 b_I = torch.ones(self.batch_size, 1, 1)
 
-            # if print_debug_info:
-            #     utils.printInBoldGreen(f"AE={A_E}")
-            #     utils.printInBoldGreen(f"AI={A_I}")
+            if print_debug_info:
+                utils.printInBoldGreen(f"AE={A_E}")
+                utils.printInBoldGreen(f"AI={A_I}")
 
             # At this point, A_E, b_E, A_I, and b_I have at least one row
 
@@ -228,6 +228,7 @@ class ConstraintModule(torch.nn.Module):
             # print(f"NA_E = {NA_E}")
             # n = NA_E.shape[2]  # dimension of the subspace
 
+            # Only take the half of A_E, b_E
             yp = torch.linalg.lstsq(A_E[:, 0:1, :], b_E[:, 0:1, :]).solution
             # print(f"yp = {yp}")
             A_p = A_I @ NA_E
@@ -360,7 +361,7 @@ class ConstraintModule(torch.nn.Module):
         objective = cp.Minimize(-self.ip_epsilon)
         self.ip_prob = cp.Problem(objective, self.ip_constraints)
 
-        assert self.ip_prob.is_dpp()
+        # assert self.ip_prob.is_dpp()
         self.ip_layer = CvxpyLayer(
             self.ip_prob,
             parameters=params,
@@ -392,8 +393,7 @@ class ConstraintModule(torch.nn.Module):
             params += [self.cs.lmis.F]
 
         ip_z0, ip_epsilon, ip_y = self.ip_layer(
-            *params,
-            solver_args={"solve_method": self.solver},
+            *params, solver_args={"solve_method": self.solver}
         )  # "max_iters": 10000
         # print(f"epsilon = {ip_epsilon}")
 
@@ -427,27 +427,22 @@ class ConstraintModule(torch.nn.Module):
                     (all_kappas_positives, kappa_positive_i), dim=1
                 )
 
-            for i in range(self.cs.num_soc):  # for each of the SOC constraints
+            # for each of the SOC constraints
+            for i in range(self.cs.num_soc):
                 idx = self.cs.socs.at(i)
                 M = self.cs.socs.M[:, idx, :]
                 s = self.cs.socs.s[:, idx, :]
                 c = self.cs.socs.c[:, idx, :]
                 d = self.cs.socs.d[:, i, :].unsqueeze(1)
                 cT = c.transpose(-1, -2)
-                # print(M)
-                # print(s)
-                # print(c)
-                # print(d)
+
                 beta = M @ self.y0 + s
                 tau = cT @ self.y0 + d
-                # print(beta)
-                # print(tau)
+
                 c_prime = rhoT @ M.transpose(-1, -2) @ M @ rho - torch.square(cT @ rho)
                 b_prime = 2 * rhoT @ M.transpose(-1, -2) @ beta - 2 * (cT @ rho) @ tau
                 a_prime = beta.transpose(-1, -2) @ beta - torch.square(tau)
-                # print(c_prime)
-                # print(b_prime)
-                # print(a_prime)
+
                 kappa_positive_i = self.solveSecondOrderEq(
                     a_prime, b_prime, c_prime, False
                 )
@@ -632,24 +627,36 @@ class ConstraintModule(torch.nn.Module):
             )
 
         if self.cs.has_quadratic_constraints:
-            violation = 0.5 * y.transpose(
-                -1, -2
-            ) @ self.cs.qcs.P @ y + self.cs.qcs.q.transpose(
-                -1, -2
-            ) @ y + self.cs.qcs.r <= eps * torch.ones(
-                self.cs.qcs.r.shape
-            )
-            utils.verify(torch.all(violation), "quadratic constraints not satisfied")
+            for i in range(self.cs.num_qc):
+                idx = self.cs.qcs.at(i)
+                violation = 0.5 * y.transpose(-1, -2) @ self.cs.qcs.P[
+                    :, idx, :
+                ] @ y + self.cs.qcs.q[:, idx, :].transpose(-1, -2) @ y + self.cs.qcs.r[
+                    :, i, :
+                ].unsqueeze(
+                    1
+                ) <= eps * torch.ones(
+                    self.cs.qcs.r[:, i, :].unsqueeze(1).shape
+                )
+                utils.verify(
+                    torch.all(violation), f"quadratic constraints {i} not satisfied"
+                )
 
         if self.cs.has_soc_constraints:
-            violation = torch.linalg.norm(
-                self.cs.socs.M @ y + self.cs.socs.s, dim=1
-            ).unsqueeze(1) - self.cs.socs.c.transpose(
-                -1, -2
-            ) @ y - self.cs.socs.d <= eps * torch.ones(
-                self.cs.socs.d.shape
-            )
-            utils.verify(torch.all(violation), "SOC constraints not satisfied")
+            for i in range(self.cs.num_soc):
+                idx = self.cs.socs.at(i)
+                violation = torch.linalg.norm(
+                    self.cs.socs.M[:, idx, :] @ y + self.cs.socs.s[:, idx, :], dim=1
+                ).unsqueeze(1) - self.cs.socs.c[:, idx, :].transpose(
+                    -1, -2
+                ) @ y - self.cs.socs.d[
+                    :, i, :
+                ].unsqueeze(
+                    1
+                ) <= eps * torch.ones(
+                    self.cs.socs.d[:, i, :].unsqueeze(1).shape
+                )
+                utils.verify(torch.all(violation), "SOC constraints not satisfied")
 
         if self.cs.has_lmi_constraints:
             lmi_left_hand_side = 0

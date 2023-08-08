@@ -16,64 +16,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 torch.set_default_tensor_type(
     torch.cuda.FloatTensor if device == "cuda" else torch.FloatTensor
 )
-# # Create a batch of matrices (3x3 matrices, batch size 2)
-# batch_size = 2
-# # matrix_size = (batch_size, 3, 3)
-# # batch_A = torch.randn(matrix_size)
+
 batch_A = torch.tensor([[[1.0, 1.0, 1.0]], [[-1.0, -1.0, -1.0]]])
 A = np.array([[1.0, 1.0, 1.0], [-1.0, -1.0, -1.0]])
-# # Compute the SVD for each matrix in the batch
-# U, S, V = torch.svd(batch_A, some=False, compute_uv=True)
-# S = S.unsqueeze(-1)
-# V = V.unsqueeze(0)
-# print(f"U={U}")
-# print(f"S={S}")
-# print(f"V={V}")
-# # # Set a tolerance value for identifying singular values close to zero
-# tolerance = torch.full((S.shape), torch.finfo(S.dtype).eps)
-
-# # # Find the indices of singular values close to zero (indicating null space)
-# null_space_mask = (S < tolerance).squeeze(-1)
-# print(null_space_mask)
-# # # Compute the null space bases for each matrix in the batch using broadcasting
-# # null_space_bases = (V.transpose(-1, -2))[null_space_mask]
-
-# # # Transpose the null space bases to the correct shape
-# # null_space_bases = null_space_bases.transpose(-1, -2)
-# print(A)
-null_space_bases1 = null_space(A)
-# # Print the null space basis vectors
-# print("Null Space Basis Vectors:")
-# # print(null_space_bases)
-# print("\nNumpy:")
-# print(null_space_bases1)
-# print("\nNew:")
-
-
-# def my_nullspace(At, rcond=None):
-#     ut, st, vht = torch.Tensor.svd(At, some=False, compute_uv=True)
-#     vht = vht.transpose(-1, -2)
-#     st = st.unsqueeze(-1)
-#     # print(ut)
-#     print(st)
-#     # print(vht)
-#     Mt, Nt = ut.shape[1], vht.shape[2]
-#     # print(Mt, Nt)
-#     if rcond is None:
-#         rcondt = torch.finfo(st.dtype).eps * max(Mt, Nt)
-#     # print(rcondt)
-#     # print(torch.max(st, 1)[0])
-#     tolt = (torch.max(st, 1)[0] * rcondt).unsqueeze(-1)
-#     print(tolt)
-#     print(st < tolt)
-#     numt = torch.sum(st > tolt, dim=1, dtype=int)
-#     print(numt)
-#     print(vht)
-#     numt = torch.tensor([[1], [2]])
-#     # print(numt)
-#     nullspace = vht[:, numt:, :].transpose(-1, -2).conj()
-#     # nullspace.backward(torch.ones_like(nullspace),retain_graph=True)
-#     return nullspace
 
 
 def nullspace(At, tolt=0.0):
@@ -122,7 +67,12 @@ B = torch.tensor(
     ]
 )
 
-indexes = torch.tensor([[[0]], [[1]]])  # take the rows from this index
+indexes = torch.tensor([[[0]], [[1]]])
+# This means taking rows 0, 1, 2 from B[0] and taking rows 1, 2 from B[1]
+# How to do it in batch?
+
+C = torch.zeros(B.shape)
+
 masks = torch.tensor([[True, True, False], [True, False, False]])
 
 # A = torch.tensor([[[1.0, 1.0, 1.0]], [[1.0, 1.0, 1.0]]])
