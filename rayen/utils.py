@@ -390,3 +390,23 @@ def H_to_V(A, b):
     # Each column of R is a ray
 
     return V, R
+
+
+def getEmpty():
+    return torch.tensor([])
+
+
+def getNoneLinearConstraints():
+    return getEmpty(), getEmpty(), getEmpty(), getEmpty()
+
+
+def getNoneQuadraticConstraints():
+    return getEmpty(), getEmpty(), getEmpty(), getEmpty()
+
+
+def getNoneSocConstraints():
+    return getEmpty(), getEmpty(), getEmpty(), getEmpty()
+
+
+def getNoneLmiConstraints():
+    return getEmpty()

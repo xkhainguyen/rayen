@@ -49,7 +49,7 @@ def nullspace2(A, tol=1e-12):
     return V_null
 
 
-print(nullspace(batch_A))
+# print(nullspace(batch_A))
 # print(nullSpaceBatch(batch_A))
 
 B = torch.tensor(
@@ -67,9 +67,22 @@ B = torch.tensor(
     ]
 )
 
+NBt = torch.tensor(
+    [
+        [-0.5774, 0.7887, -0.2113],
+        [-0.5774, -0.2113, 0.7887],
+    ]
+)
+NB = NBt.transpose(-1, -2)
+y = torch.tensor([[1.0], [2.0], [3.0]])
+z = torch.tensor([[1.0], [2.0]])
+
 indexes = torch.tensor([[[0]], [[1]]])
 # This means taking rows 0, 1, 2 from B[0] and taking rows 1, 2 from B[1]
 # How to do it in batch?
+
+print(NB @ z)  # constraint completion
+print(NBt @ y)
 
 C = torch.zeros(B.shape)
 

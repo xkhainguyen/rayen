@@ -41,13 +41,13 @@ my_layer = constraint_module.ConstraintModule(
     y_dim=example.y_dim,
     method=method,
     num_cstr=example.num_cstr,
-    constraintInputMap=example.constraintInputMap,
+    cstrInputMap=example.cstrInputMap,
 )
 
 num_cstr_samples = 1
 
 for i in range(num_cstr_samples):
-    num_samples = 10
+    num_samples = 5
 
     # Define step input tensor
     xv_batched = torch.Tensor(num_samples, example.xv_dim, 1).uniform_(-2, 2) * 150
@@ -63,7 +63,8 @@ for i in range(num_cstr_samples):
     # print(xc_batched)
     # print(x_batched)
 
-    my_layer.eval()  # This changes the self.training variable of the module
+    # my_layer.eval()  # This changes the self.training variable of the module
+    x_batched.requires_grad_()
 
     time_start = time.time()
     result = my_layer(x_batched)
@@ -71,6 +72,17 @@ for i in range(num_cstr_samples):
     print(total_time_per_sample)
     # print(f"result = {result}")
     my_layer.isFeasible(result, 1e-8)
+
+    result.sum().backward()
+
+    # Call the autograd.gradcheck function
+    correct_grad = torch.autograd.gradcheck(
+        my_layer, x_batched, eps=1e-6, atol=1e-4, rtol=1e-3
+    )
+
+    # Print the result
+    print("Gradient computation is correct:", correct_grad)
+    # print("x_batched.grad = ", x_batched.grad)
 
     result = result.detach().numpy()
 

@@ -23,16 +23,16 @@ from rayen import constraints, constraint_module, utils
 
 np.set_printoptions(precision=2)
 
-torch.set_default_dtype(torch.float64)
 # Set the default device to GPU if available, otherwise use CPU
 # device = "cuda" if torch.cuda.is_available() else "cpu"
 # torch.set_default_tensor_type(
 #     torch.cuda.FloatTensor if device == "cuda" else torch.FloatTensor
 # )
+torch.set_default_dtype(torch.float64)
 
 method = "RAYEN"
 
-example_number = 0
+example_number = 2
 example = RppExample(example_number)
 
 my_layer = constraint_module.ConstraintModule(
@@ -41,18 +41,18 @@ my_layer = constraint_module.ConstraintModule(
     y_dim=example.y_dim,
     method=method,
     num_cstr=example.num_cstr,
-    constraintInputMap=example.constraintInputMap,
+    cstrInputMap=example.cstrInputMap,
 )
 
 fig = plt.figure()
 fig.suptitle(method + ": " + example.name, fontsize=14)
 
-num_cstr_samples = 1
+num_cstr_samples = 4
 rows = math.ceil(math.sqrt(num_cstr_samples))
 cols = rows
 
 for i in range(num_cstr_samples):
-    num_samples = 3
+    num_samples = 300
 
     # Define step input tensor
     xv_batched_x = torch.Tensor(num_samples, 1, 1).uniform_(-2, 2) * 150
@@ -73,7 +73,7 @@ for i in range(num_cstr_samples):
     # print(xc)
     # xc = torch.tensor([[10.0], [10.0]])
     xc_batched = xc.unsqueeze(0).repeat(num_samples, 1, 1)
-    x_batched = torch.cat((xv_batched, xc_batched), 1)
+    # x_batched = torch.cat((xv_batched, xc_batched), 1)
 
     # print(xv_batched)
     # print(xc_batched)
@@ -82,33 +82,33 @@ for i in range(num_cstr_samples):
     my_layer.eval()  # This changes the self.training variable of the module
 
     time_start = time.time()
-    result = my_layer(x_batched)
-#     total_time_per_sample = (time.time() - time_start) / num_samples
-#     print(total_time_per_sample)
-#     # print(f"result = {result}")
-#     my_layer.isFeasible(result, 1e-8)
+    result = my_layer(xv_batched, xc_batched)
+    total_time_per_sample = (time.time() - time_start) / num_samples
+    print(total_time_per_sample)
+    # print(f"result = {result}")
+    my_layer.isFeasible(result, 1e-8)
 
-#     result = result.detach().numpy()
+    result = result.detach().numpy()
 
-#     y0 = my_layer.gety0()
+    y0 = my_layer.gety0()
 
-#     # print("FINISHED")
-#     # print(f"y0 = {y0}")
-#     # print(f"xv = {xv_batched}")
-#     # print(f"xc = {xc_batched}")
-#     # print(f"result = {result}")
+    # print("FINISHED")
+    # print(f"y0 = {y0}")
+    # print(f"xv = {xv_batched}")
+    # print(f"xc = {xc_batched}")
+    # print(f"result = {result}")
 
-#     ax = fig.add_subplot(
-#         rows, cols, i + 1, projection="3d" if example.y_dim == 3 else None
-#     )
-#     ax.set_title(f"xc = {xc.numpy().T}")
-#     ax.title.set_size(10)
-#     ax.set_aspect("equal", "box")
-#     if example.y_dim == 2:
-#         ax.scatter(y0[0, 0, 0], y0[0, 1, 0], color="r", s=100)
-#         ax.scatter(result[:, 0, 0], result[:, 1, 0])
-#     if example.y_dim == 3:
-#         ax.scatter(y0[0, 0, 0], y0[0, 1, 0], y0[0, 2, 0], color="r", s=100)
-#         ax.scatter(result[:, 0, 0], result[:, 1, 0], result[:, 2, 0])
+    ax = fig.add_subplot(
+        rows, cols, i + 1, projection="3d" if example.y_dim == 3 else None
+    )
+    ax.set_title(f"xc = {xc.numpy().T}")
+    ax.title.set_size(10)
+    ax.set_aspect("equal", "box")
+    if example.y_dim == 2:
+        ax.scatter(y0[0, 0, 0], y0[0, 1, 0], color="r", s=100)
+        ax.scatter(result[:, 0, 0], result[:, 1, 0])
+    if example.y_dim == 3:
+        ax.scatter(y0[0, 0, 0], y0[0, 1, 0], y0[0, 2, 0], color="r", s=100)
+        ax.scatter(result[:, 0, 0], result[:, 1, 0], result[:, 2, 0])
 
-# plt.show()
+plt.show()

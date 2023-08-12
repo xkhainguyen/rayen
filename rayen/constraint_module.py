@@ -34,7 +34,7 @@ class ConstraintModule(torch.nn.Module):
         y_dim=None,
         method="RAYEN",
         num_cstr=None,
-        constraintInputMap=None,
+        cstrInputMap=None,
         args_DC3=None,
     ):
         super().__init__()
@@ -45,7 +45,7 @@ class ConstraintModule(torch.nn.Module):
         self.k = y_dim  # Dimension of the ambient space (output)
         self.n = None  # Dimension of the embedded space (determined later)
         self.batch_size = None
-        self.constraintInputMap = constraintInputMap
+        self.cstrInputMap = cstrInputMap
 
         self.cs = constraints_torch.ConvexConstraints(num_cstr)
         self.params_indexes = {"qc": None, "soc": None, "lmi": None}
@@ -78,6 +78,7 @@ class ConstraintModule(torch.nn.Module):
 
         if create_step_input_map:
             self.stepInputMap = nn.Linear(self.m, self.n)
+            nn.init.kaiming_normal_(self.stepInputMap.weight)
         else:
             self.stepInputMap = nn.Sequential()
 
@@ -97,7 +98,7 @@ class ConstraintModule(torch.nn.Module):
             self.cs.socs.c,
             self.cs.socs.d,
             self.cs.lmis.F,
-        ) = torch.vmap(self.constraintInputMap)(temp_x)
+        ) = torch.vmap(self.cstrInputMap)(temp_x)
 
     def selectSolver(self):
         installed_solvers = cp.installed_solvers()
@@ -120,11 +121,14 @@ class ConstraintModule(torch.nn.Module):
     # Function to recompute and register params
     def updateForwardParams(self):
         self.y0 = self.gety0()
+
         # Precompute for inverse distance to the frontier of Z along v_bar
+        # For embedded linear constraints
         self.D = self.A_p / (
             (self.b_p - self.A_p @ self.z0) @ torch.ones(self.batch_size, 1, self.n)
-        )  # for linear
+        )
 
+        # For quadratic constraints
         if self.cs.has_quadratic_constraints:
             self.all_delta = torch.empty((self.batch_size, 0, self.n))
             self.all_phi = torch.empty((self.batch_size, 0, self.n))
@@ -146,6 +150,7 @@ class ConstraintModule(torch.nn.Module):
                 self.all_phi = torch.cat((self.all_phi, phi), dim=1)
                 self.all_delta = torch.cat((self.all_delta, delta), dim=1)
 
+        # For LMI constraints
         if self.cs.has_lmi_constraints:
             idx = self.cs.lmis.at(self.k)
             H = self.cs.lmis.F[:, idx, :]
@@ -181,7 +186,7 @@ class ConstraintModule(torch.nn.Module):
                 A = torch.cat((A, A2, -A2), axis=1)
                 b = torch.cat((b, b2, -b2), axis=1)
 
-            print_debug_info = 1
+            print_debug_info = 0
             if print_debug_info:
                 utils.printInBoldGreen(f"A is {A.shape} and b is {b.shape}")
 
@@ -410,7 +415,7 @@ class ConstraintModule(torch.nn.Module):
         kappa = torch.relu(torch.max(self.D @ v_bar, dim=1, keepdim=True).values)
 
         if self.cs.has_nonlinear_constraints:
-            rho = self.NA_E @ v_bar
+            rho = self.NA_E @ v_bar  # from embedded space to ambient space
             rhoT = torch.transpose(rho, -1, -2)
             all_kappas_positives = torch.empty((self.batch_size, 0, 1))
 
@@ -455,7 +460,8 @@ class ConstraintModule(torch.nn.Module):
                 )
                 # print(all_kappas_positives)
 
-            if self.cs.has_lmi_constraints:  # If there are LMI constraints:
+            # If there are LMI constraints:
+            if self.cs.has_lmi_constraints:
                 # print("LMI")
                 ############# OBTAIN S
                 # First option (much slower)
@@ -538,27 +544,25 @@ class ConstraintModule(torch.nn.Module):
         # print(f"alpha = {alpha}")
         return self.getyFromz(self.z0 + alpha * v_bar)
 
-    def forward(self, x):
+    def forward(self, xv, xc):
         ##################  MAPPER LAYER ####################
         # nn.Module forward method only accepts a single input tensor
         # nsib denotes the number of samples in the batch
         # each sample includes xv (size m) and xc (size d)
         # x has dimensions [nsib, m + d, 1]
-        self.batch_size = x.shape[0]
-        utils.verify(x.shape[1] == self.m + self.d, "wrong input dimension")
-        xv = x[:, 0 : self.m, 0:1]  # After this, xv has dim [nsib, m, 1]
-        xc = x[:, self.m : self.m + self.d, 0:1]  # After this, xv has dim [nsib, d, 1]
+        self.batch_size = xv.shape[0]
+        # utils.verify(x.shape[1] == self.m + self.d, "wrong input dimension")
+        # xv = x[:, 0 : self.m, 0:1]  # After this, xv has dim [nsib, m, 1]
+        # xc = x[:, self.m : self.m + self.d, 0:1]  # After this, xv has dim [nsib, d, 1]
 
         # TODO Refactor this into sth cleaner
-        v = self.stepInputMap(
-            xv.view(xv.size(0), -1)
-        )  # After this, q has dimensions [nsib, numel_output_mapper]
-        v = torch.unsqueeze(
-            v, dim=2
-        )  # After this, q has dimensions [nsib, numel_output_mapper, 1]
+        v = self.stepInputMap(xv)  # shape = (nsamples, m)
+        v = torch.unsqueeze(v, dim=2)  # shape = (nsamples, m, 1)
+        xc = torch.unsqueeze(xc, dim=2)  # shape = (nsamples, d, 1)
 
-        # print(f"xc = {xc}")
-        # print(f"v = {v}")
+        # FIXME
+        # Option 1: Define CustomDataset just like before
+        # Option 2: Compute again (this applies to inference)
         (
             self.cs.lc.A1,
             self.cs.lc.b1,
@@ -573,7 +577,7 @@ class ConstraintModule(torch.nn.Module):
             self.cs.socs.c,
             self.cs.socs.d,
             self.cs.lmis.F,
-        ) = torch.vmap(self.constraintInputMap)(xc)
+        ) = torch.vmap(self.cstrInputMap)(xc)
         ####################################################
 
         y = self.forwardForMethod(v)

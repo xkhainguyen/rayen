@@ -2,6 +2,7 @@
 """
 
 import torch
+from rayen.utils import *
 
 
 class RppExample:
@@ -14,7 +15,7 @@ class RppExample:
             self.xc_dim = 1
             self.y_dim = 3  # ambient space
             self.num_cstr = [0, 0, 0, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap0
+            self.cstrInputMap = self.exampleMap0
 
         if self.example == 1:  # A polygon embedded in 3D with an sphere
             self.name = "A polygon embedded in 3D with an sphere"
@@ -22,7 +23,7 @@ class RppExample:
             self.xc_dim = 1
             self.y_dim = 3
             self.num_cstr = [0, 0, 1, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap1
+            self.cstrInputMap = self.exampleMap1
 
         if self.example == 2:  # Just a sphere with varying center and radius
             self.name = "sphere with xc1-3 center and xc0 radius"
@@ -30,7 +31,7 @@ class RppExample:
             self.xc_dim = 4
             self.y_dim = 3
             self.num_cstr = [0, 0, 1, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap2
+            self.cstrInputMap = self.exampleMap2
 
         elif self.example == 3:  # Just a paraboloid
             self.name = "paraboloid with q = q0 - xc"
@@ -38,7 +39,7 @@ class RppExample:
             self.xc_dim = 3
             self.y_dim = 3
             self.num_cstr = [0, 0, 1, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap3
+            self.cstrInputMap = self.exampleMap3
 
         elif self.example == 4:  # A 2d polyhedron
             self.name = "2d polyhedron with b = b0 * xc"
@@ -46,7 +47,7 @@ class RppExample:
             self.xc_dim = 1
             self.y_dim = 2
             self.num_cstr = [0, 0, 0, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap4
+            self.cstrInputMap = self.exampleMap4
 
         elif self.example == 5:  # A 2d polyhedron with a circle
             self.name = (
@@ -56,7 +57,7 @@ class RppExample:
             self.xc_dim = 4
             self.y_dim = 2
             self.num_cstr = [0, 0, 1, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap5
+            self.cstrInputMap = self.exampleMap5
 
         elif self.example == 6:  # The intersection between a cube and two planes
             self.name = "The intersection between a cube and two planes"
@@ -64,7 +65,7 @@ class RppExample:
             self.xc_dim = 4
             self.y_dim = 3
             self.num_cstr = [0, 0, 0, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap6
+            self.cstrInputMap = self.exampleMap6
 
         elif self.example == 7:  # Just a plane
             self.name = "Just a plane"
@@ -72,7 +73,7 @@ class RppExample:
             self.xc_dim = 4
             self.y_dim = 3
             self.num_cstr = [0, 0, 0, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap7
+            self.cstrInputMap = self.exampleMap7
 
         elif self.example == 8:
             # Unbounded 2d polyhedron. It has two vertices and two rays
@@ -81,7 +82,7 @@ class RppExample:
             self.xc_dim = 3
             self.y_dim = 2
             self.num_cstr = [0, 0, 0, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap8
+            self.cstrInputMap = self.exampleMap8
 
         elif self.example == 9:  # A paraboloid and a plane
             self.name = "a paraboloid and a plane"
@@ -89,7 +90,7 @@ class RppExample:
             self.xc_dim = 3
             self.y_dim = 3
             self.num_cstr = [0, 0, 0, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap9
+            self.cstrInputMap = self.exampleMap9
 
         elif self.example == 10:  # A paraboloid and a sphere
             self.name = "paraboloid with and a sphere with xc1-3 center and xc0 radius"
@@ -97,7 +98,7 @@ class RppExample:
             self.xc_dim = 4
             self.y_dim = 3
             self.num_cstr = [0, 0, 2, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap10
+            self.cstrInputMap = self.exampleMap10
 
         elif self.example == 11:  # A second-order cone
             self.name = "second-order cone with s = s0 - x"
@@ -105,7 +106,7 @@ class RppExample:
             self.xc_dim = 3
             self.y_dim = 3
             self.num_cstr = [0, 0, 0, 1, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap11
+            self.cstrInputMap = self.exampleMap11
 
         elif self.example == 14:  # # Polyhedron and Ellipsoid
             self.name = "polyhedron b = b0 + xc with and ellipsoid"
@@ -113,7 +114,7 @@ class RppExample:
             self.xc_dim = 2
             self.y_dim = 3
             self.num_cstr = [0, 0, 1, 0, 0]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap14
+            self.cstrInputMap = self.exampleMap14
 
         elif self.example == 12:  # The PSD cone in 3D
             self.name = "PSD cone in 3D"
@@ -121,7 +122,7 @@ class RppExample:
             self.xc_dim = 1
             self.y_dim = 3
             self.num_cstr = [0, 0, 0, 0, 1]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap12
+            self.cstrInputMap = self.exampleMap12
 
         elif self.example == 13:  # Polyhedron, Ellipsoid, SOC, PSD
             self.name = "Polyhedron, Ellipsoid, SOC, PSD"
@@ -129,7 +130,7 @@ class RppExample:
             self.xc_dim = 3
             self.y_dim = 3
             self.num_cstr = [0, 0, 1, 1, 1]  # linear ineq, linear eq, qcs, socs, lmis
-            self.constraintInputMap = self.exampleMap13
+            self.cstrInputMap = self.exampleMap13
 
         elif self.example == 20:  # High-dimensional sphere
             self.name = "High-dimensional sphere"
@@ -137,7 +138,7 @@ class RppExample:
             self.xc_dim = 3
             self.y_dim = 100
             self.num_cstr = [0, 0, 1, 0, 0]
-            self.constraintInputMap = self.exampleMap20
+            self.cstrInputMap = self.exampleMap20
 
     def exampleMap0(self, x):  # A 2D polygon embedded in 3D
         A1, b1 = getCube()
@@ -292,26 +293,6 @@ class RppExample:
         M, s, c, d = getNoneSocConstraints()
         F = getNoneLmiConstraints()
         return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d, F
-
-
-def getEmpty():
-    return torch.tensor([])
-
-
-def getNoneLinearConstraints():
-    return getEmpty(), getEmpty(), getEmpty(), getEmpty()
-
-
-def getNoneQuadraticConstraints():
-    return getEmpty(), getEmpty(), getEmpty(), getEmpty()
-
-
-def getNoneSocConstraints():
-    return getEmpty(), getEmpty(), getEmpty(), getEmpty()
-
-
-def getNoneLmiConstraints():
-    return getEmpty()
 
 
 def getCube():
