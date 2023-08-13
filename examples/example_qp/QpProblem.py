@@ -260,9 +260,7 @@ class QpProblem(ABC):
     ## For PyTorch
     def objectiveFunction(self, Y):
         # shape (1, 1)
-        return (
-            0.5 * Y.transpose(-1, -2) @ self.P @ Y + self.q.transpose(-1, -2) @ Y
-        ).sum(dim=0)
+        return 0.5 * Y.transpose(-1, -2) @ self.P @ Y + self.q.transpose(-1, -2) @ Y
 
     def updateConstraints(self, Xc=None):
         if Xc is None:

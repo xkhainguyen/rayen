@@ -26,7 +26,7 @@ torch.set_default_dtype(torch.float64)
 from CbfQpProblem import CbfQpProblem
 
 # Define problem
-args = {"probType": "cbf_qp", "xo": 1, "xc": 2, "nsamples": 86}
+args = {"probType": "cbf_qp", "xo": 1, "xc": 2, "nsamples": 953}
 
 # Load data, and put on GPU if needed
 prob_type = args["probType"]
@@ -54,7 +54,7 @@ batch_size = 2
 
 dataset = TensorDataset(data.X, data.Y)
 train_dataset, valid_dataset, test_dataset = torch.utils.data.random_split(
-    dataset, [70, 8, 8]
+    dataset, [data.train_num, data.valid_num, data.test_num]
 )
 
 # # all tensor
@@ -68,6 +68,6 @@ valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset))
 test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
 
 print(f"{len(train_dataset)=} {len(valid_dataset)=} {len(test_dataset)=}")
-for X, Y in valid_loader:
+for X, Y in train_loader:
     print(X, Y)
-    # break
+    break

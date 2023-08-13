@@ -33,6 +33,7 @@ torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=2)
 
 from rayen import constraints, constraint_module, utils
+from examples.early_stopping import EarlyStopping
 
 # pickle is lazy and does not serialize class definitions or function
 # definitions. Instead it saves a reference of how to find the class
@@ -49,9 +50,9 @@ def main():
         "nsamples": 8778,
         "method": "RAYEN",
         "loss_type": "supervised",
-        "epochs": 2,
-        "batch_size": 100,
-        "lr": 1e-3,
+        "epochs": 50,
+        "batch_size": 200,
+        "lr": 1e-5,
         "hidden_size": 300,
         "save_all_stats": True,
         "res_save_freq": 5,
@@ -89,7 +90,12 @@ def main():
     with open(os.path.join(save_dir, "args.dict"), "wb") as f:
         pickle.dump(args, f)
 
-    train_net(data, args, save_dir)
+    # train_net(data, args, save_dir)
+
+    infer_dir = os.path.join(
+        "results", str(data), "1691923999-107286", "cbf_qp_net.dict"
+    )
+    infer_net(data, args, infer_dir)
 
 
 def train_net(data, args, save_dir=None):
@@ -115,6 +121,8 @@ def train_net(data, args, save_dir=None):
     cbf_qp_net.to(DEVICE)
     optimizer = optim.Adam(cbf_qp_net.parameters(), lr=solver_step)
 
+    earlyStopper = EarlyStopping(patience=3, verbose=True)
+
     stats = {}
 
     for i in range(nepochs):
@@ -139,7 +147,7 @@ def train_net(data, args, save_dir=None):
 
         for train_batch in train_loader:
             Xtrain = train_batch[0].to(DEVICE)
-            Ytrain = train_batch[1].to(DEVICE)
+            Ytrain = train_batch[1].to(DEVICE).unsqueeze(-1)
             start_time = time.time()
             optimizer.zero_grad()
             Yhat_train = cbf_qp_net(Xtrain)
@@ -147,10 +155,9 @@ def train_net(data, args, save_dir=None):
             train_loss.sum().backward()
             optimizer.step()
             train_time = time.time() - start_time
-            print(train_loss.detach().cpu().numpy().shape)
             dict_agg(epoch_stats, "train_loss", train_loss.detach().cpu().numpy())
 
-        print(
+        utils.printInBoldBlue(
             "Epoch {}: train loss {:.4f}, valid loss {:.4f}, test loss {:.4f}".format(
                 i,
                 np.mean(epoch_stats["train_loss"]),
@@ -158,6 +165,7 @@ def train_net(data, args, save_dir=None):
                 np.mean(epoch_stats["test_loss"]),
             )
         )
+
         if args["save_all_stats"]:
             if i == 0:
                 for key in epoch_stats.keys():
@@ -170,27 +178,25 @@ def train_net(data, args, save_dir=None):
         else:
             stats = epoch_stats
 
-        if i % args["res_save_freq"] == 0:
-            with open(os.path.join(save_dir, "stats.dict"), "wb") as f:
-                pickle.dump(stats, f)
-            with open(os.path.join(save_dir, "cbf_qp_net.dict"), "wb") as f:
-                torch.save(cbf_qp_net.state_dict(), f)
+        earlyStopper(np.mean(epoch_stats["valid_loss"]), cbf_qp_net, stats, save_dir)
+        if earlyStopper.early_stop:
+            utils.printInBoldRed("EarlyStopping: stop training!")
+            break
 
-    with open(os.path.join(save_dir, "stats.dict"), "wb") as f:
-        pickle.dump(stats, f)
-    with open(os.path.join(save_dir, "cbf_qp_net.dict"), "wb") as f:
-        torch.save(cbf_qp_net.state_dict(), f)
     return cbf_qp_net, stats
 
 
 def total_loss(data, X, Y, Yhat, args):
+    """Compute loss for batch X in supervised or unsupervised manner
+    Output: obj_cost (nsamples, 1)"""
+
     if args["loss_type"] == "supervised":
         obj_cost = torch.square(Y - Yhat)
     else:
         Xo = data.getXo(X)
         data.updateObjective(Xo)
         obj_cost = data.objectiveFunction(Y)
-    return obj_cost / X.shape[0]
+    return obj_cost
 
 
 # Modifies stats in place
@@ -213,13 +219,27 @@ def eval_net(data, X, Y, net, args, prefix, stats):
     Yhat = net(X)
     end_time = time.time()
     # print(f"{X=} {Y=}")
-    # print(total_loss(data, X, Y).detach().cpu().numpy())
     dict_agg(
         stats,
         make_prefix("loss"),
         total_loss(data, X, Y, Yhat, args).detach().cpu().numpy(),
     )
     return stats
+
+
+def infer_net(data, args, save_dir):
+    dataset = TensorDataset(data.X, data.Y)
+
+    model = CbfQpNet(data, args)
+    model.load_state_dict(torch.load(save_dir))
+    model.eval()
+
+    for i in range(10):
+        X, Y = dataset[i]
+        X = X.unsqueeze(0)
+        print(f"{X=}")
+        Yhat = model(X).item()
+        print(f"{Y=}; {Yhat=}")
 
 
 ###################################################################
@@ -236,10 +256,12 @@ class CbfQpNet(nn.Module):
             self._data.x_dim,
             self._args["hidden_size"],
             self._args["hidden_size"],
+            self._args["hidden_size"],
         ]
         layers = reduce(
             operator.add,
             [
+                # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
                 [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
                 for a, b in zip(layer_sizes[0:-1], layer_sizes[1:])
             ],
@@ -261,7 +283,7 @@ class CbfQpNet(nn.Module):
         )
 
     def forward(self, x):
-        x = x.squeeze()
+        x = x.squeeze(-1)
         xv = self.nn_layer(x)
         xc = x[:, self._data.xo_dim : self._data.xo_dim + self._data.xc_dim]
         y = self.rayen_layer(xv, xc)
