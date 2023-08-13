@@ -25,14 +25,14 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 torch.set_default_dtype(torch.float64)
 
 if __name__ == "__main__":
-    num_samples = 1000
+    num_samples = 50000
     xo_dim = 1  # nominal control u_bar dimension
     y_dim = 1  # filtered control, output of the network
     pos_dim = 1
     vel_dim = 1
     xc_dim = pos_dim + vel_dim  # state x dimension
 
-    np.random.seed(11)
+    np.random.seed(12)
     # should normalize all input
     Xo = np.random.uniform(-1, 1.0, size=(num_samples, xo_dim))
     Xc_pos = np.random.uniform(-1, 1.0, size=(num_samples, pos_dim))

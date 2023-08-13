@@ -47,15 +47,16 @@ def main():
         "prob_type": "cbf_qp",
         "xo": 1,
         "xc": 2,
-        "nsamples": 8778,
+        "nsamples": 47526,
         "method": "RAYEN",
-        "loss_type": "supervised",
-        "epochs": 50,
+        "loss_type": "unsupervised",
+        "epochs": 100,
         "batch_size": 200,
-        "lr": 1e-5,
-        "hidden_size": 300,
+        "lr": 1e-6,
+        "hidden_size": 500,
         "save_all_stats": True,
         "res_save_freq": 5,
+        "patience": 5,
     }
 
     # Load data, and put on GPU if needed
@@ -80,22 +81,24 @@ def main():
 
     data._device = DEVICE
 
-    save_dir = os.path.join(
-        "results",
-        str(data),
-        str(time.time()).replace(".", "-"),
-    )
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-    with open(os.path.join(save_dir, "args.dict"), "wb") as f:
-        pickle.dump(args, f)
+    train = 1
 
-    # train_net(data, args, save_dir)
-
-    infer_dir = os.path.join(
-        "results", str(data), "1691923999-107286", "cbf_qp_net.dict"
-    )
-    infer_net(data, args, infer_dir)
+    if train:
+        save_dir = os.path.join(
+            "results",
+            str(data),
+            str(time.time()).replace(".", "-"),
+        )
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        with open(os.path.join(save_dir, "args.dict"), "wb") as f:
+            pickle.dump(args, f)
+        train_net(data, args, save_dir)
+    else:
+        infer_dir = os.path.join(
+            "results", str(data), "1691946380-6986017", "cbf_qp_net.dict"
+        )
+        infer_net(data, args, infer_dir)
 
 
 def train_net(data, args, save_dir=None):
@@ -121,7 +124,7 @@ def train_net(data, args, save_dir=None):
     cbf_qp_net.to(DEVICE)
     optimizer = optim.Adam(cbf_qp_net.parameters(), lr=solver_step)
 
-    earlyStopper = EarlyStopping(patience=3, verbose=True)
+    earlyStopper = EarlyStopping(patience=args["patience"], verbose=True)
 
     stats = {}
 
@@ -195,7 +198,7 @@ def total_loss(data, X, Y, Yhat, args):
     else:
         Xo = data.getXo(X)
         data.updateObjective(Xo)
-        obj_cost = data.objectiveFunction(Y)
+        obj_cost = data.objectiveFunction(Yhat)
     return obj_cost
 
 
@@ -261,8 +264,8 @@ class CbfQpNet(nn.Module):
         layers = reduce(
             operator.add,
             [
-                # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
-                [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
+                [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
+                # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
                 for a, b in zip(layer_sizes[0:-1], layer_sizes[1:])
             ],
         )
