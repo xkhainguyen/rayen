@@ -54,11 +54,11 @@ def main():
         "prob_type": "cbf_qp",
         "xo": 1,
         "xc": 2,
-        "nsamples": 951,
+        "nsamples": 9491,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 100,
-        "batch_size": 100,
+        "batch_size": 200,
         "lr": 2e-6,
         "hidden_size": 500,
         "save_all_stats": True,  # otherwise, save latest stats only
@@ -90,7 +90,7 @@ def main():
     data._device = DEVICE
     dir_dict = {}
 
-    TRAIN = 1
+    TRAIN = 0
 
     if TRAIN:
         dir_dict["now"] = datetime.now().strftime("%b%d_%H-%M-%S")
@@ -105,7 +105,7 @@ def main():
         print(f"{dir_dict['save_dir']=}")
     else:
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug14_16-26-49", "cbf_qp_net.dict"
+            "results", str(data), "Aug14_17-54-22", "cbf_qp_net.dict"
         )
         infer_net(data, args, dir_dict)
 
@@ -136,7 +136,7 @@ def train_net(data, args, dir_dict=None):
     # valid_dataset = TensorDataset(data.validX)
     # test_dataset = TensorDataset(data.testX)
 
-    ## Second option
+    # Second option
     # train_dataset, valid_dataset, test_dataset = torch.utils.data.random_split(
     #     dataset, [data.train_num, data.valid_num, data.test_num]
     # )
@@ -153,9 +153,7 @@ def train_net(data, args, dir_dict=None):
             data.train_num + data.valid_num + data.test_num,
         ),
     )
-    print(f"{len(train_dataset)=}")
-    print(f"{len(valid_dataset)=}")
-    print(f"{len(test_dataset)=}")
+    print(f"{len(train_dataset)=}; {len(valid_dataset)=}; {len(test_dataset)=}")
 
     # To data batch
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -199,12 +197,13 @@ def train_net(data, args, dir_dict=None):
             Xtrain = train_batch[0].to(DEVICE)
             Ytrain = train_batch[1].to(DEVICE).unsqueeze(-1)
             start_time = time.time()
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             Yhat_train = cbf_qp_net(Xtrain)
             train_loss = total_loss(data, Xtrain, Ytrain, Yhat_train, args)
             train_loss.sum().backward()
             optimizer.step()
             train_time = time.time() - start_time
+            # print(f"{train_time=}")
             dict_agg(epoch_stats, "train_loss", train_loss.detach().cpu().numpy())
 
         utils.printInBoldBlue(
@@ -310,14 +309,15 @@ def infer_net(data, args, dir_dict=None):
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
-    for i in range(10):
+    for i in range(20):
         idx = np.random.randint(0, len(test_dataset))
         X, Y = dataset[idx]
-        print(f"{X.T =}")
         X = X.unsqueeze(0)
-        Yhat = model(X).item()
-        Y = Y.item()
-        print(f"{Y   =:.4f}\n{Yhat=:.4f}")
+        Ynn = model(X).item()
+        Xo = X[0][0].item()
+        print(f"{Xo   = :.4f}")
+        Yopt = Y.item()
+        print(f"{Yopt = :.4f}\n{Ynn  = :.4f}")
         print("--")
 
 
@@ -340,8 +340,8 @@ class CbfQpNet(nn.Module):
         layers = reduce(
             operator.add,
             [
-                [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
-                # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
+                # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
+                [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
                 for a, b in zip(layer_sizes[0:-1], layer_sizes[1:])
             ],
         )
