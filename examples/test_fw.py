@@ -55,10 +55,10 @@ for i in range(num_cstr_samples):
     num_samples = 300
 
     # Define step input tensor
-    xv_batched_x = torch.Tensor(num_samples, 1, 1).uniform_(-2, 2) * 150
-    xv_batched_y = torch.Tensor(num_samples, 1, 1).uniform_(-2, 2) * 150
+    xv_batched_x = torch.Tensor(num_samples, 1).uniform_(-2, 2) * 150
+    xv_batched_y = torch.Tensor(num_samples, 1).uniform_(-2, 2) * 150
     if example.xv_dim == 3:
-        xv_batched_z = torch.Tensor(num_samples, 1, 1).uniform_(-2, 2) * 150
+        xv_batched_z = torch.Tensor(num_samples, 1).uniform_(-2, 2) * 150
         xv_batched = torch.cat((xv_batched_x, xv_batched_y, xv_batched_z), 1)
     if example.xv_dim == 2:
         xv_batched = torch.cat((xv_batched_x, xv_batched_y), 1)
@@ -69,10 +69,10 @@ for i in range(num_cstr_samples):
     # xc_batched = torch.tensor([[[1.0]]])
 
     # Define constraint input tensor
-    xc = torch.Tensor(example.xc_dim, 1).uniform_(1, 5)
+    xc = torch.Tensor(example.xc_dim).uniform_(1, 5)
     # print(xc)
     # xc = torch.tensor([[10.0], [10.0]])
-    xc_batched = xc.unsqueeze(0).repeat(num_samples, 1, 1)
+    xc_batched = xc.unsqueeze(0).repeat(num_samples, 1)
     # x_batched = torch.cat((xv_batched, xc_batched), 1)
 
     # print(xv_batched)

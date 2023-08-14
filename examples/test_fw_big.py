@@ -50,13 +50,13 @@ for i in range(num_cstr_samples):
     num_samples = 5
 
     # Define step input tensor
-    xv_batched = torch.Tensor(num_samples, example.xv_dim, 1).uniform_(-2, 2) * 150
+    xv_batched = torch.Tensor(num_samples, example.xv_dim).uniform_(-2, 2) * 150
 
     # Define constraint input tensor
-    xc = torch.Tensor(example.xc_dim, 1).uniform_(1, 5)
+    xc = torch.Tensor(example.xc_dim).uniform_(1, 5)
     # print(xc)
     # xc = torch.tensor([[10.0], [10.0]])
-    xc_batched = xc.unsqueeze(0).repeat(num_samples, 1, 1)
+    xc_batched = xc.unsqueeze(0).repeat(num_samples, 1)
     x_batched = torch.cat((xv_batched, xc_batched), 1)
 
     # print(xv_batched)

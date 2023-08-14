@@ -296,6 +296,7 @@ class QpProblem(ABC):
                     u=my_u,
                     verbose=False,
                     eps_prim_inf=tol,
+                    max_iter=100,
                 )
                 start_time = time.time()
                 results = solver.solve()
@@ -317,7 +318,7 @@ class QpProblem(ABC):
         return sols, total_time, parallel_time
 
     def calc_Y(self):
-        Y = self.optimizationSolve(self.X)[0]
+        Y = self.optimizationSolve(self.X, tol=1e-8)[0]
         feas_mask = ~np.isnan(Y).all(axis=1)
         self._nsamples = feas_mask.sum()
         self._X = self._X[feas_mask]

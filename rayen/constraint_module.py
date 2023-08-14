@@ -102,8 +102,8 @@ class ConstraintModule(torch.nn.Module):
 
     def selectSolver(self):
         installed_solvers = cp.installed_solvers()
-        if ("GUROBI" in installed_solvers) and self.cs.has_lmi_constraints == False:
-            self.solver = "GUROBI"  # You need to do `python -m pip install gurobipy`
+        # if ("GUROBI" in installed_solvers) and self.cs.has_lmi_constraints == False:
+        #     self.solver = "GUROBI"  # You need to do `python -m pip install gurobipy`
         if ("ECOS" in installed_solvers) and self.cs.has_lmi_constraints == False:
             self.solver = "ECOS"
         elif "SCS" in installed_solvers:
@@ -398,7 +398,14 @@ class ConstraintModule(torch.nn.Module):
             params += [self.cs.lmis.F]
 
         ip_z0, ip_epsilon, ip_y = self.ip_layer(
-            *params, solver_args={"solve_method": self.solver}
+            *params,
+            solver_args={
+                "solve_method": self.solver,
+                "feastol": 1e-2,
+                "reltol": 1e-2,
+                "abstol": 1e-3,
+                "reltol_inacc": 1e-5,
+            },
         )  # "max_iters": 10000
         # print(f"epsilon = {ip_epsilon}")
 
@@ -548,8 +555,7 @@ class ConstraintModule(torch.nn.Module):
         ##################  MAPPER LAYER ####################
         # nn.Module forward method only accepts a single input tensor
         # nsib denotes the number of samples in the batch
-        # each sample includes xv (size m) and xc (size d)
-        # x has dimensions [nsib, m + d, 1]
+        # each sample includes xv (nsamples, m) and xc (nsamples, d)
         self.batch_size = xv.shape[0]
         # utils.verify(x.shape[1] == self.m + self.d, "wrong input dimension")
         # xv = x[:, 0 : self.m, 0:1]  # After this, xv has dim [nsib, m, 1]

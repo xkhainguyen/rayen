@@ -46,7 +46,7 @@ if __name__ == "__main__":
     print(len(problem.Y))
 
     with open(
-        "./cbf_qp_dataset_xo{}_xc{}_ex{}".format(xo_dim, xc_dim, problem.nsamples),
+        "./data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(xo_dim, xc_dim, problem.nsamples),
         "wb",
     ) as f:
         pickle.dump(problem, f)

@@ -14,23 +14,19 @@ import torch.optim as optim
 import operator
 from functools import reduce
 from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
 import pickle
 import time
 import os
+import subprocess
 import argparse
 
 import sys
 from os.path import normpath, dirname, join
 
 sys.path.insert(0, normpath(join(dirname(__file__), "../..")))
-
-# DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-DEVICE = torch.device("cpu")
-print(f"device: {DEVICE}")
-torch.set_default_dtype(torch.float64)
-np.set_printoptions(precision=2)
 
 from rayen import constraints, constraint_module, utils
 from examples.early_stopping import EarlyStopping
@@ -40,6 +36,16 @@ from examples.early_stopping import EarlyStopping
 # (the module it lives in and its name)
 from CbfQpProblem import CbfQpProblem
 
+# DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+DEVICE = torch.device("cpu")
+print(f"{DEVICE=}")
+torch.set_default_dtype(torch.float64)
+np.set_printoptions(precision=4)
+
+seed = 1234
+torch.manual_seed(seed)
+np.random.seed(seed)
+
 
 def main():
     # Define problem
@@ -47,22 +53,23 @@ def main():
         "prob_type": "cbf_qp",
         "xo": 1,
         "xc": 2,
-        "nsamples": 47526,
+        "nsamples": 953,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 100,
-        "batch_size": 200,
-        "lr": 1e-6,
+        "batch_size": 100,
+        "lr": 2e-6,
         "hidden_size": 500,
-        "save_all_stats": True,
+        "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
-        "patience": 5,
+        "estop_patience": 5,
+        "estop_delta": 0.05,  # improving rate of loss
     }
 
     # Load data, and put on GPU if needed
     prob_type = args["prob_type"]
     if prob_type == "cbf_qp":
-        filepath = "cbf_qp_dataset_xo{}_xc{}_ex{}".format(
+        filepath = "data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(
             args["xo"], args["xc"], args["nsamples"]
         )
     else:
@@ -81,9 +88,9 @@ def main():
 
     data._device = DEVICE
 
-    train = 1
+    TRAIN = 1
 
-    if train:
+    if TRAIN:
         save_dir = os.path.join(
             "results",
             str(data),
@@ -94,56 +101,95 @@ def main():
         with open(os.path.join(save_dir, "args.dict"), "wb") as f:
             pickle.dump(args, f)
         train_net(data, args, save_dir)
+        print(f"{save_dir=}")
     else:
         infer_dir = os.path.join(
-            "results", str(data), "1691946380-6986017", "cbf_qp_net.dict"
+            "results", str(data), "1692016320-6447008", "cbf_qp_net.dict"
         )
         infer_net(data, args, infer_dir)
 
 
 def train_net(data, args, save_dir=None):
+    # Set up TensorBoard
+    writer = SummaryWriter(flush_secs=1)
+    # Find the latest run directory
+    latest_run = os.listdir("runs")[-1]
+    # Start TensorBoard for the latest run
+    subprocess.Popen(
+        [
+            f"python3 -m tensorboard.main --logdir={os.path.join('runs', latest_run)}",
+        ],
+        shell=True,
+    )
+
+    # Some parameters
     solver_step = args["lr"]
     nepochs = args["epochs"]
     batch_size = args["batch_size"]
 
-    # all data tensor
+    # All data tensor
+    dataset = TensorDataset(data.X, data.Y)
+
+    ## First option
     # train_dataset = TensorDataset(data.trainX)
     # valid_dataset = TensorDataset(data.validX)
     # test_dataset = TensorDataset(data.testX)
-    dataset = TensorDataset(data.X, data.Y)
-    train_dataset, valid_dataset, test_dataset = torch.utils.data.random_split(
-        dataset, [data.train_num, data.valid_num, data.test_num]
+
+    ## Second option
+    # train_dataset, valid_dataset, test_dataset = torch.utils.data.random_split(
+    #     dataset, [data.train_num, data.valid_num, data.test_num]
+    # )
+
+    ## Third option (already created with randomness). Keep the same order for infer_net
+    train_dataset = torch.utils.data.Subset(dataset, range(data.train_num))
+    valid_dataset = torch.utils.data.Subset(
+        dataset, range(data.train_num, data.train_num + data.valid_num)
     )
-    # print(train_dataset[17])
-    # to data batch
+    test_dataset = torch.utils.data.Subset(
+        dataset,
+        range(
+            data.train_num + data.valid_num,
+            data.train_num + data.valid_num + data.test_num,
+        ),
+    )
+    print(f"{len(train_dataset)=}")
+    print(f"{len(valid_dataset)=}")
+    print(f"{len(test_dataset)=}")
+
+    # To data batch
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset))
     test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
 
+    # Network
     cbf_qp_net = CbfQpNet(data, args)
     cbf_qp_net.to(DEVICE)
     optimizer = optim.Adam(cbf_qp_net.parameters(), lr=solver_step)
 
-    earlyStopper = EarlyStopping(patience=args["patience"], verbose=True)
+    earlyStopper = EarlyStopping(
+        patience=args["estop_patience"], delta=args["estop_delta"], verbose=True
+    )
 
-    stats = {}
+    stats = {}  # statistics for all epochs
 
+    # For each epoch
     for i in range(nepochs):
-        epoch_stats = {}
+        epoch_stats = {}  # statistics for this epoach
 
-        # Get valid loss
-        cbf_qp_net.eval()
-        for valid_batch in valid_loader:
-            Xvalid = valid_batch[0].to(DEVICE)
-            Yvalid = valid_batch[1].to(DEVICE)
-            eval_net(data, Xvalid, Yvalid, cbf_qp_net, args, "valid", epoch_stats)
+        with torch.no_grad():
+            # Get valid loss
+            cbf_qp_net.eval()
+            for valid_batch in valid_loader:
+                Xvalid = valid_batch[0].to(DEVICE)
+                Yvalid = valid_batch[1].to(DEVICE)
+                eval_net(data, Xvalid, Yvalid, cbf_qp_net, args, "valid", epoch_stats)
 
-        # Get test loss
-        cbf_qp_net.eval()
-        for test_batch in test_loader:
-            Xtest = test_batch[0].to(DEVICE)
-            Ytest = test_batch[1].to(DEVICE)
-            eval_net(data, Xtest, Ytest, cbf_qp_net, args, "test", epoch_stats)
+            # Get test loss
+            cbf_qp_net.eval()
+            for test_batch in test_loader:
+                Xtest = test_batch[0].to(DEVICE)
+                Ytest = test_batch[1].to(DEVICE)
+                eval_net(data, Xtest, Ytest, cbf_qp_net, args, "test", epoch_stats)
 
         # Get train loss
         cbf_qp_net.train()
@@ -169,6 +215,19 @@ def train_net(data, args, save_dir=None):
             )
         )
 
+        # Print to TensorBoard
+        writer.add_scalars(
+            "loss",
+            {
+                "train": np.mean(epoch_stats["train_loss"]),
+                "valid": np.mean(epoch_stats["valid_loss"]),
+                "test": np.mean(epoch_stats["test_loss"]),
+            },
+            i,
+        )
+        writer.flush()
+
+        # Log all statistics
         if args["save_all_stats"]:
             if i == 0:
                 for key in epoch_stats.keys():
@@ -181,11 +240,13 @@ def train_net(data, args, save_dir=None):
         else:
             stats = epoch_stats
 
+        # Early stop if not improving
         earlyStopper(np.mean(epoch_stats["valid_loss"]), cbf_qp_net, stats, save_dir)
         if earlyStopper.early_stop:
             utils.printInBoldRed("EarlyStopping: stop training!")
             break
 
+    writer.close()
     return cbf_qp_net, stats
 
 
@@ -215,7 +276,7 @@ def dict_agg(stats, key, value, op="concat"):
         stats[key] = value
 
 
-# Modifies stats in place
+@torch.no_grad()
 def eval_net(data, X, Y, net, args, prefix, stats):
     make_prefix = lambda x: "{}_{}".format(prefix, x)
     start_time = time.time()
@@ -230,19 +291,31 @@ def eval_net(data, X, Y, net, args, prefix, stats):
     return stats
 
 
+@torch.no_grad()
 def infer_net(data, args, save_dir):
-    dataset = TensorDataset(data.X, data.Y)
+    "Evaluate random test data intuitively"
 
+    dataset = TensorDataset(data.X, data.Y)
+    test_dataset = torch.utils.data.Subset(
+        dataset,
+        range(
+            data.train_num + data.valid_num,
+            data.train_num + data.valid_num + data.test_num,
+        ),
+    )
     model = CbfQpNet(data, args)
     model.load_state_dict(torch.load(save_dir))
     model.eval()
 
     for i in range(10):
-        X, Y = dataset[i]
+        idx = np.random.randint(0, len(test_dataset))
+        X, Y = dataset[idx]
+        print(f"{X.T =}")
         X = X.unsqueeze(0)
-        print(f"{X=}")
         Yhat = model(X).item()
-        print(f"{Y=}; {Yhat=}")
+        Y = Y.item()
+        print(f"{Y   =:.4f}\n{Yhat=:.4f}")
+        print("--")
 
 
 ###################################################################
@@ -264,8 +337,8 @@ class CbfQpNet(nn.Module):
         layers = reduce(
             operator.add,
             [
-                [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
-                # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
+                # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
+                [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
                 for a, b in zip(layer_sizes[0:-1], layer_sizes[1:])
             ],
         )
@@ -294,4 +367,5 @@ class CbfQpNet(nn.Module):
 
 
 if __name__ == "__main__":
+    os.system("pkill -f tensorboard")
     main()

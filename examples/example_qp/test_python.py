@@ -31,7 +31,7 @@ args = {"probType": "cbf_qp", "xo": 1, "xc": 2, "nsamples": 953}
 # Load data, and put on GPU if needed
 prob_type = args["probType"]
 if prob_type == "cbf_qp":
-    filepath = "cbf_qp_dataset_xo{}_xc{}_ex{}".format(
+    filepath = "data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(
         args["xo"], args["xc"], args["nsamples"]
     )
 else:
@@ -67,7 +67,18 @@ train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset))
 test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
 
-print(f"{len(train_dataset)=} {len(valid_dataset)=} {len(test_dataset)=}")
-for X, Y in train_loader:
-    print(X, Y)
-    break
+# print(f"{len(train_dataset)=} {len(valid_dataset)=} {len(test_dataset)=}")
+# for X, Y in train_loader:
+#     print(X, Y)
+#     break
+
+
+with open(
+    "/home/khai/SSD/Code/rayen/examples/example_qp/results/QpProblem-1-2-953/1692015136-4423506/stats.dict",
+    "rb",
+) as f:
+    data = pickle.load(f)
+
+print(data["valid_loss"].shape)
+print(np.mean(data["valid_loss"], 1))
+print(np.mean(data["valid_loss"][-1]))
