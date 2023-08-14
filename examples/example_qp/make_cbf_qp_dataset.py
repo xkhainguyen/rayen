@@ -11,6 +11,7 @@
 import numpy as np
 import pickle
 import torch
+from torch.utils.data import TensorDataset, DataLoader
 
 import sys
 import os
@@ -24,6 +25,19 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 
 torch.set_default_dtype(torch.float64)
 
+
+def check_balance(data):
+    count_filtered = 0
+    count_nonfiltered = 0
+    for i in range(len(data)):
+        X, Y = dataset[i]
+        if torch.norm(X[0, 0] - Y) <= 1e-8:
+            count_nonfiltered = count_nonfiltered + 1
+        else:
+            count_filtered = count_filtered + 1
+    print(f"{count_filtered=}; {count_nonfiltered=}")
+
+
 if __name__ == "__main__":
     num_samples = 50000
     xo_dim = 1  # nominal control u_bar dimension
@@ -32,7 +46,7 @@ if __name__ == "__main__":
     vel_dim = 1
     xc_dim = pos_dim + vel_dim  # state x dimension
 
-    np.random.seed(12)
+    np.random.seed(1234)
     # should normalize all input
     Xo = np.random.uniform(-1, 1.0, size=(num_samples, xo_dim))
     Xc_pos = np.random.uniform(-1, 1.0, size=(num_samples, pos_dim))
@@ -43,7 +57,29 @@ if __name__ == "__main__":
     problem.updateObjective()
     problem.updateConstraints()
     problem.calc_Y()
-    print(len(problem.Y))
+    print(f"{len(problem.Y)=}")
+
+    print(f"{problem.train_num=}; {problem.valid_num=}; {problem.test_num=}")
+
+    data = problem
+
+    # All data tensor
+    dataset = TensorDataset(data.X, data.Y)
+    train_dataset = torch.utils.data.Subset(dataset, range(data.train_num))
+    valid_dataset = torch.utils.data.Subset(
+        dataset, range(data.train_num, data.train_num + data.valid_num)
+    )
+    test_dataset = torch.utils.data.Subset(
+        dataset,
+        range(
+            data.train_num + data.valid_num,
+            data.train_num + data.valid_num + data.test_num,
+        ),
+    )
+
+    check_balance(train_dataset)
+    check_balance(valid_dataset)
+    check_balance(test_dataset)
 
     with open(
         "./data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(xo_dim, xc_dim, problem.nsamples),

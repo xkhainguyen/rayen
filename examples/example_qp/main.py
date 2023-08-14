@@ -19,6 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import pickle
 import time
+from datetime import datetime
 import os
 import subprocess
 import argparse
@@ -53,7 +54,7 @@ def main():
         "prob_type": "cbf_qp",
         "xo": 1,
         "xc": 2,
-        "nsamples": 953,
+        "nsamples": 951,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 100,
@@ -87,37 +88,37 @@ def main():
                 pass
 
     data._device = DEVICE
+    dir_dict = {}
 
     TRAIN = 1
 
     if TRAIN:
-        save_dir = os.path.join(
-            "results",
-            str(data),
-            str(time.time()).replace(".", "-"),
-        )
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        with open(os.path.join(save_dir, "args.dict"), "wb") as f:
+        dir_dict["now"] = datetime.now().strftime("%b%d_%H-%M-%S")
+        dir_dict["save_dir"] = os.path.join("results", str(data), dir_dict["now"])
+        dir_dict["tb_dir"] = os.path.join("runs", dir_dict["now"] + "_" + str(data))
+        if not os.path.exists(dir_dict["save_dir"]):
+            os.makedirs(dir_dict["save_dir"])
+        with open(os.path.join(dir_dict["save_dir"], "args.dict"), "wb") as f:
             pickle.dump(args, f)
-        train_net(data, args, save_dir)
-        print(f"{save_dir=}")
+
+        train_net(data, args, dir_dict)
+        print(f"{dir_dict['save_dir']=}")
     else:
-        infer_dir = os.path.join(
-            "results", str(data), "1692016320-6447008", "cbf_qp_net.dict"
+        dir_dict["infer_dir"] = os.path.join(
+            "results", str(data), "Aug14_16-26-49", "cbf_qp_net.dict"
         )
-        infer_net(data, args, infer_dir)
+        infer_net(data, args, dir_dict)
 
 
-def train_net(data, args, save_dir=None):
+def train_net(data, args, dir_dict=None):
     # Set up TensorBoard
-    writer = SummaryWriter(flush_secs=1)
+    writer = SummaryWriter(dir_dict["tb_dir"], flush_secs=1)
     # Find the latest run directory
     latest_run = os.listdir("runs")[-1]
     # Start TensorBoard for the latest run
     subprocess.Popen(
         [
-            f"python3 -m tensorboard.main --logdir={os.path.join('runs', latest_run)}",
+            f"python3 -m tensorboard.main --logdir={os.path.join('runs', latest_run)} --bind_all",
         ],
         shell=True,
     )
@@ -241,7 +242,9 @@ def train_net(data, args, save_dir=None):
             stats = epoch_stats
 
         # Early stop if not improving
-        earlyStopper(np.mean(epoch_stats["valid_loss"]), cbf_qp_net, stats, save_dir)
+        earlyStopper(
+            np.mean(epoch_stats["valid_loss"]), cbf_qp_net, stats, dir_dict["save_dir"]
+        )
         if earlyStopper.early_stop:
             utils.printInBoldRed("EarlyStopping: stop training!")
             break
@@ -292,8 +295,8 @@ def eval_net(data, X, Y, net, args, prefix, stats):
 
 
 @torch.no_grad()
-def infer_net(data, args, save_dir):
-    "Evaluate random test data intuitively"
+def infer_net(data, args, dir_dict=None):
+    "Intuitvely evaluate random test data by inference"
 
     dataset = TensorDataset(data.X, data.Y)
     test_dataset = torch.utils.data.Subset(
@@ -304,7 +307,7 @@ def infer_net(data, args, save_dir):
         ),
     )
     model = CbfQpNet(data, args)
-    model.load_state_dict(torch.load(save_dir))
+    model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
     for i in range(10):
@@ -337,8 +340,8 @@ class CbfQpNet(nn.Module):
         layers = reduce(
             operator.add,
             [
-                # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
-                [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
+                [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
+                # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
                 for a, b in zip(layer_sizes[0:-1], layer_sizes[1:])
             ],
         )
