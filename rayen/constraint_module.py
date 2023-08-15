@@ -51,7 +51,7 @@ class ConstraintModule(torch.nn.Module):
         self.params_indexes = {"qc": None, "soc": None, "lmi": None}
 
         # Pass dummy input to check the constraintInputMap users provide
-        self.test_dummy(xc_dim)
+        self.testDummy(xc_dim)
 
         self.cs.firstInit()
 
@@ -82,7 +82,7 @@ class ConstraintModule(torch.nn.Module):
         else:
             self.stepInputMap = nn.Sequential()
 
-    def test_dummy(self, xc_dim):
+    def testDummy(self, xc_dim):
         temp_x = torch.ones(1, xc_dim, 1)  # just a vector
         (
             self.cs.lc.A1,

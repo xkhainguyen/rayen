@@ -23,7 +23,6 @@ from datetime import datetime
 import os
 import subprocess
 import argparse
-
 import sys
 from os.path import normpath, dirname, join
 
@@ -43,7 +42,7 @@ print(f"{DEVICE=}")
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
-seed = 1234567
+seed = 123456
 torch.manual_seed(seed)
 np.random.seed(seed)
 
@@ -54,13 +53,13 @@ def main():
         "prob_type": "cbf_qp",
         "xo": 1,
         "xc": 2,
-        "nsamples": 47520,
+        "nsamples": 861,
         "method": "RAYEN",
         "loss_type": "unsupervised",
-        "epochs": 100,
+        "epochs": 200,
         "batch_size": 200,
-        "lr": 1e-7,
-        "hidden_size": 500,
+        "lr": 5e-6,
+        "hidden_size": 600,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
         "estop_patience": 5,
@@ -105,7 +104,7 @@ def main():
         print(f"{dir_dict['save_dir']=}")
     else:
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug14_21-15-24", "cbf_qp_net.dict"
+            "results", str(data), "Aug15_15-28-29", "cbf_qp_net.dict"
         )
         infer_net(data, args, dir_dict)
 
@@ -129,7 +128,7 @@ def train_net(data, args, dir_dict=None):
     batch_size = args["batch_size"]
 
     # All data tensor
-    dataset = TensorDataset(data.X, data.Y)
+    dataset = TensorDataset(data.X, data.Y, data.obj_val)
 
     ## First option
     # train_dataset = TensorDataset(data.trainX)
@@ -153,7 +152,14 @@ def train_net(data, args, dir_dict=None):
             data.train_num + data.valid_num + data.test_num,
         ),
     )
-    print(f"{len(train_dataset)=}; {len(valid_dataset)=}; {len(test_dataset)=}")
+    print(f"{len(train_dataset) =}; {len(valid_dataset) =}; {len(test_dataset) =}")
+
+    # Compute ground truth averaged objective/loss
+    train_truth_obj = compute_truth_obj(train_dataset)
+    valid_truth_obj = compute_truth_obj(valid_dataset)
+    test_truth_obj = compute_truth_obj(test_dataset)
+
+    print(f"{train_truth_obj =}; {valid_truth_obj =}; {test_truth_obj =}")
 
     # To data batch
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -172,7 +178,7 @@ def train_net(data, args, dir_dict=None):
     stats = {}  # statistics for all epochs
 
     # For each epoch
-    for i in range(nepochs):
+    for epoch in range(nepochs):
         epoch_stats = {}  # statistics for this epoach
 
         with torch.no_grad():
@@ -207,11 +213,14 @@ def train_net(data, args, dir_dict=None):
             dict_agg(epoch_stats, "train_loss", train_loss.detach().cpu().numpy())
 
         utils.printInBoldBlue(
-            "Epoch {}: train loss {:.4f}, valid loss {:.4f}, test loss {:.4f}".format(
-                i,
+            "Epoch {}: train loss {:.4f}/{:.4f}, valid loss {:.4f}/{:.4f}, test loss {:.4f}/{:.4f}".format(
+                epoch,
                 np.mean(epoch_stats["train_loss"]),
+                train_truth_obj,
                 np.mean(epoch_stats["valid_loss"]),
+                valid_truth_obj,
                 np.mean(epoch_stats["test_loss"]),
+                test_truth_obj,
             )
         )
 
@@ -223,13 +232,13 @@ def train_net(data, args, dir_dict=None):
                 "valid": np.mean(epoch_stats["valid_loss"]),
                 "test": np.mean(epoch_stats["test_loss"]),
             },
-            i,
+            epoch,
         )
         writer.flush()
 
         # Log all statistics
         if args["save_all_stats"]:
-            if i == 0:
+            if epoch == 0:
                 for key in epoch_stats.keys():
                     stats[key] = np.expand_dims(np.array(epoch_stats[key]), axis=0)
             else:
@@ -245,7 +254,14 @@ def train_net(data, args, dir_dict=None):
             np.mean(epoch_stats["valid_loss"]), cbf_qp_net, stats, dir_dict["save_dir"]
         )
         if earlyStopper.early_stop:
-            utils.printInBoldRed("EarlyStopping: stop training!")
+            utils.printInBoldRed("\nEarlyStopping: stop training!")
+            utils.printInBoldGreen(
+                "normalized train loss {:.4f}, valid loss {:.4f}, test loss {:.4f}".format(
+                    train_truth_obj / np.mean(epoch_stats["train_loss"]),
+                    valid_truth_obj / np.mean(epoch_stats["valid_loss"]),
+                    test_truth_obj / np.mean(epoch_stats["test_loss"]),
+                )
+            )
             break
 
     writer.close()
@@ -263,6 +279,15 @@ def total_loss(data, X, Y, Yhat, args):
         data.updateObjective(Xo)
         obj_cost = data.objectiveFunction(Yhat)
     return obj_cost
+
+
+def compute_truth_obj(dataset):
+    """Compute the truth objective value/loss from the dataset"""
+    sum = 0.0
+    for i in range(len(dataset)):
+        obj_val = dataset[i][2]
+        sum += obj_val
+    return sum / len(dataset)
 
 
 # Modifies stats in place
@@ -297,7 +322,7 @@ def eval_net(data, X, Y, net, args, prefix, stats):
 def infer_net(data, args, dir_dict=None):
     "Intuitvely evaluate random test data by inference"
 
-    dataset = TensorDataset(data.X, data.Y)
+    dataset = TensorDataset(data.X, data.Y, data.obj_val)
     test_dataset = torch.utils.data.Subset(
         dataset,
         range(
@@ -314,7 +339,7 @@ def infer_net(data, args, dir_dict=None):
     num = len(test_dataset)
     for i in range(50):
         idx = np.random.randint(0, num)
-        X, Y = dataset[idx]
+        X, Y, obj_val = test_dataset[idx]
         X = X.unsqueeze(0)
         start_time = time.time()
         Ynn = model(X).item()
@@ -345,14 +370,23 @@ class CbfQpNet(nn.Module):
             self._args["hidden_size"],
             self._args["hidden_size"],
         ]
-        layers = reduce(
-            operator.add,
-            [
-                # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
-                [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
-                for a, b in zip(layer_sizes[0:-1], layer_sizes[1:])
-            ],
-        )
+        # layers = reduce(
+        #     operator.add,
+        #     [
+        #         # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
+        #         [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
+        #         for a, b in zip(layer_sizes[0:-1], layer_sizes[1:])
+        #     ],
+        # )
+
+        layers = [
+            nn.Linear(layer_sizes[0], layer_sizes[1]),
+            nn.ReLU(),
+            nn.BatchNorm1d(layer_sizes[1]),
+            nn.Linear(layer_sizes[1], layer_sizes[2]),
+            nn.ReLU(),
+            nn.Linear(layer_sizes[1], layer_sizes[2]),
+        ]
 
         for layer in layers:
             if type(layer) == nn.Linear:
@@ -380,3 +414,4 @@ class CbfQpNet(nn.Module):
 if __name__ == "__main__":
     os.system("pkill -f tensorboard")
     main()
+    print()

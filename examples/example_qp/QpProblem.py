@@ -63,6 +63,7 @@ class QpProblem(ABC):
         self._A1 = None
         self._b1 = None
         self._Y = None
+        self._obj_val = None
         self._x_dim = X.shape[1]
         self._xo_dim = xo_dim
         self._xc_dim = xc_dim
@@ -143,6 +144,10 @@ class QpProblem(ABC):
         return self._Y
 
     @property
+    def obj_val(self):
+        return self._obj_val
+
+    @property
     def P_np(self):
         return self.P.detach().cpu().numpy()
 
@@ -203,34 +208,6 @@ class QpProblem(ABC):
         return self.nsamples - self.valid_num - self.test_num
 
     @property
-    def trainX(self):
-        return self.X[: self.train_num]
-
-    @property
-    def validX(self):
-        return self.X[self.train_num : self.train_num + self.valid_num]
-
-    @property
-    def testX(self):
-        return self.X[self.train_num + self.valid_num :]
-
-    @property
-    def trainY(self):
-        return self.Y[: int(self.nsamples * self.train_frac)]
-
-    @property
-    def validY(self):
-        return self.Y[
-            int(self.nsamples * self.train_frac) : int(
-                self.nsamples * (self.train_frac + self.valid_frac)
-            )
-        ]
-
-    @property
-    def testY(self):
-        return self.Y[int(self.nsamples * (self.train_frac + self.valid_frac)) :]
-
-    @property
     def device(self):
         return self._device
 
@@ -281,6 +258,7 @@ class QpProblem(ABC):
             )
             X_np = X.detach().cpu().numpy()
             Y = []
+            obj_val = []
             total_time = 0
             for i in range(self.nsamples):
                 solver = osqp.OSQP()
@@ -305,25 +283,29 @@ class QpProblem(ABC):
                 total_time += end_time - start_time
                 if results.info.status == "solved":
                     Y.append(results.x)
+                    obj_val.append(results.info.obj_val)
                 else:
                     Y.append(np.ones(self.y_dim) * np.nan)
+                    obj_val.append(np.nan)
 
             # print(Y)
             sols = np.array(Y)
+            obj_val = np.array(obj_val)
             parallel_opt_time = total_time / len(X_np)
             print(f"{parallel_opt_time=}")
 
         else:
             raise NotImplementedError
 
-        return sols, total_time, parallel_opt_time
+        return sols, obj_val, total_time, parallel_opt_time
 
     def calc_Y(self):
-        Y = self.optimizationSolve(self.X, tol=1e-8)[0]
+        Y, obj_val, *_ = self.optimizationSolve(self.X, tol=1e-8)
         feas_mask = ~np.isnan(Y).all(axis=1)
         self._nsamples = feas_mask.sum()
         self._X = self._X[feas_mask]
         self._Y = torch.tensor(Y[feas_mask])
+        self._obj_val = torch.tensor(obj_val[feas_mask])
         return Y
 
 

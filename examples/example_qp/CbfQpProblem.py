@@ -41,7 +41,7 @@ class CbfQpProblem(QpProblem):
         t1 = torch.eye(dim, dim)
         t2 = -torch.eye(dim, dim)
         A = torch.cat((t1, t2), dim=0)
-        b = torch.ones(dim * 2, 1) * 1.1  # CHANGE
+        b = torch.ones(dim * 2, 1) * 1.0  # CHANGE
         return A, b
 
     def getCbfConstraint(self, xc):
@@ -49,7 +49,7 @@ class CbfQpProblem(QpProblem):
         dim = self.y_dim
         alpha1 = 1.0
         alpha2 = 1.0
-        pos_box = torch.ones(2 * dim, 1) * 1.1  # CHANGE
+        pos_box = torch.ones(2 * dim, 1) * 1.0  # CHANGE
         t1 = torch.eye(dim, dim)
         t2 = torch.cat((torch.zeros(dim, dim), t1), dim=1)
         t3 = torch.cat((t1, (torch.zeros(dim, dim))), dim=1)
