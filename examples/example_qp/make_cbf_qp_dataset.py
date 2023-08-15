@@ -39,7 +39,7 @@ def check_balance(data):
 
 
 if __name__ == "__main__":
-    num_samples = 50000
+    num_samples = 5000
     xo_dim = 1  # nominal control u_bar dimension
     y_dim = 1  # filtered control, output of the network
     pos_dim = 1
@@ -81,8 +81,8 @@ if __name__ == "__main__":
     check_balance(valid_dataset)
     check_balance(test_dataset)
 
-    with open(
-        "./data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(xo_dim, xc_dim, problem.nsamples),
-        "wb",
-    ) as f:
-        pickle.dump(problem, f)
+    # with open(
+    #     "./data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(xo_dim, xc_dim, problem.nsamples),
+    #     "wb",
+    # ) as f:
+    #     pickle.dump(problem, f)

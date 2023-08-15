@@ -43,7 +43,7 @@ print(f"{DEVICE=}")
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
-seed = 1234
+seed = 1234567
 torch.manual_seed(seed)
 np.random.seed(seed)
 
@@ -54,12 +54,12 @@ def main():
         "prob_type": "cbf_qp",
         "xo": 1,
         "xc": 2,
-        "nsamples": 9491,
+        "nsamples": 47520,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 100,
         "batch_size": 200,
-        "lr": 2e-6,
+        "lr": 1e-7,
         "hidden_size": 500,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
@@ -105,7 +105,7 @@ def main():
         print(f"{dir_dict['save_dir']=}")
     else:
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug14_17-54-22", "cbf_qp_net.dict"
+            "results", str(data), "Aug14_21-15-24", "cbf_qp_net.dict"
         )
         infer_net(data, args, dir_dict)
 
@@ -309,16 +309,24 @@ def infer_net(data, args, dir_dict=None):
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
-    for i in range(20):
-        idx = np.random.randint(0, len(test_dataset))
+    total_time = 0.0
+
+    num = len(test_dataset)
+    for i in range(50):
+        idx = np.random.randint(0, num)
         X, Y = dataset[idx]
         X = X.unsqueeze(0)
+        start_time = time.time()
         Ynn = model(X).item()
+        total_time += time.time() - start_time
         Xo = X[0][0].item()
         print(f"{Xo   = :.4f}")
         Yopt = Y.item()
-        print(f"{Yopt = :.4f}\n{Ynn  = :.4f}")
+        utils.printInBoldGreen(f"{Yopt = :.4f}\n{Ynn  = :.4f}")
         print("--")
+
+    infer_time = total_time / 50
+    print(f"{infer_time=}")
 
 
 ###################################################################

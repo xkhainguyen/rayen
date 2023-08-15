@@ -310,12 +310,13 @@ class QpProblem(ABC):
 
             # print(Y)
             sols = np.array(Y)
-            parallel_time = total_time / len(X_np)
+            parallel_opt_time = total_time / len(X_np)
+            print(f"{parallel_opt_time=}")
 
         else:
             raise NotImplementedError
 
-        return sols, total_time, parallel_time
+        return sols, total_time, parallel_opt_time
 
     def calc_Y(self):
         Y = self.optimizationSolve(self.X, tol=1e-8)[0]

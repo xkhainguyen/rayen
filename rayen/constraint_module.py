@@ -108,10 +108,6 @@ class ConstraintModule(torch.nn.Module):
             self.solver = "ECOS"
         elif "SCS" in installed_solvers:
             self.solver = "SCS"
-        # elif 'OSQP' in installed_solvers:
-        # 	self.solver='OSQP'
-        # elif 'CVXOPT' in installed_solvers:
-        # 	self.solver='CVXOPT'
         else:
             # There are more solvers, see https://www.cvxpy.org/tutorial/advanced/index.html#choosing-a-solver
             raise Exception(f"Which solver do you have installed?")
@@ -380,15 +376,6 @@ class ConstraintModule(torch.nn.Module):
 
     # Function to compute z0
     def solveInteriorPoint(self):
-        # Update constraint
-        # self.ip_constraints = self.cs.getConstraintsInSubspaceCvxpy(
-        #     self.ip_z0, self.ip_epsilon
-        # )
-        # print(f"self.A_p = {self.A_p}")
-        # print(f"self.b_p = {self.b_p}")
-        # print(f"P = {self.cs.qcs.P}")
-        # print(f"q = {self.cs.qcs.q}")
-        # print(f"r = {self.cs.qcs.r}")
         params = [self.NA_E, self.yp, self.A_p, self.b_p]
         if self.cs.has_quadratic_constraints:
             params += [self.cs.qcs.P_sqrt, self.cs.qcs.q, self.cs.qcs.r]
@@ -408,13 +395,6 @@ class ConstraintModule(torch.nn.Module):
             },
         )  # "max_iters": 10000
         # print(f"epsilon = {ip_epsilon}")
-
-        # if ip_prob.status != "optimal" and ip_prob.status != "optimal_inaccurate":
-        #     raise Exception(f"Value is not optimal, prob_status={ip_prob.status}")
-
-        # utils.verify(
-        #     epsilon.value > 1e-8
-        # )  # If not, there are no strictly feasible points in the subspace
 
         return ip_z0
 
