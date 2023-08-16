@@ -71,7 +71,7 @@ class EarlyStopping:
         # torch.save(model.state_dict(), self.path)
         with open(os.path.join(save_dir, "stats.dict"), "wb") as f:
             pickle.dump(stats, f)
-        with open(os.path.join(save_dir, "cbf_qp_net.dict"), "wb") as f:
+        with open(os.path.join(save_dir, "model.dict"), "wb") as f:
             torch.save(model.state_dict(), f)
 
     # Added by jtorde

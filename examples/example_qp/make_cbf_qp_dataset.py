@@ -41,11 +41,11 @@ def check_balance(data, dataset):
 
 
 if __name__ == "__main__":
-    num_samples = 10000
-    xo_dim = 1  # nominal control u_bar dimension
-    y_dim = 1  # filtered control, output of the network
-    pos_dim = 1
-    vel_dim = 1
+    num_samples = 1
+    xo_dim = 2  # nominal control u_bar dimension
+    y_dim = 2  # filtered control, output of the network
+    pos_dim = 2
+    vel_dim = 2
     xc_dim = pos_dim + vel_dim  # state x dimension
 
     np.random.seed(1234)
@@ -56,6 +56,29 @@ if __name__ == "__main__":
     X = np.hstack((Xo, Xc_pos, Xc_vel))
 
     problem = CbfQpProblem(X, xo_dim, xc_dim, y_dim, valid_frac=0.1, test_frac=0.1)
+
+    # Augment the intact samples
+    # for i in range(num_samples):
+    #     # for i in range(2):
+    #     xc = X[i : i + 1, xo_dim:]
+    #     for j in range(20):
+    #         xoj = np.random.uniform(-1, 1.0, size=(1, xo_dim))
+    #         X = np.vstack((X, np.hstack([xoj, xc])))
+
+    for i in range(int(num_samples)):
+        # for i in range(2):
+        xc = X[i : i + 1, xo_dim:].T
+        A1, b1, *_ = problem.cstrInputMap(torch.tensor(xc))
+        for j in range(2):
+            xoj = np.random.uniform(-1, 1.0, size=(xo_dim, 1))
+            if torch.all((A1) @ torch.tensor(xoj) <= (b1)):
+                # print(xoj)
+                X = np.vstack([X, np.vstack([xoj, xc]).T])
+
+    np.random.shuffle(X)
+
+    problem = CbfQpProblem(X, xo_dim, xc_dim, y_dim, valid_frac=0.1, test_frac=0.1)
+
     problem.updateObjective()
     problem.updateConstraints()
     problem.calc_Y()
@@ -83,10 +106,10 @@ if __name__ == "__main__":
     check_balance(data, valid_dataset)
     check_balance(data, test_dataset)
 
-    # print(train_dataset[0])
-    # print(problem.obj_val)
-    with open(
-        "./data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(xo_dim, xc_dim, problem.nsamples),
-        "wb",
-    ) as f:
-        pickle.dump(problem, f)
+    print(train_dataset[1])
+    print(problem.obj_val)
+    # with open(
+    #     "./data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(xo_dim, xc_dim, problem.nsamples),
+    #     "wb",
+    # ) as f:
+    #     pickle.dump(problem, f)

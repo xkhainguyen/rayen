@@ -38,33 +38,36 @@ from CbfQpProblem import CbfQpProblem
 
 # DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 DEVICE = torch.device("cpu")
-print(f"{DEVICE=}")
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
-seed = 123456
+seed = 1999
 torch.manual_seed(seed)
 np.random.seed(seed)
 
 
 def main():
+    utils.printInBoldBlue("CBF-QP Problem")
+    print(f"{DEVICE = }")
     # Define problem
     args = {
         "prob_type": "cbf_qp",
         "xo": 1,
         "xc": 2,
-        "nsamples": 861,
+        "nsamples": 18368,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 200,
-        "batch_size": 200,
+        "batch_size": 256,
         "lr": 5e-6,
-        "hidden_size": 600,
+        "hidden_size": 100,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
         "estop_patience": 5,
         "estop_delta": 0.05,  # improving rate of loss
+        "seed": seed,
     }
+    print(args)
 
     # Load data, and put on GPU if needed
     prob_type = args["prob_type"]
@@ -89,9 +92,10 @@ def main():
     data._device = DEVICE
     dir_dict = {}
 
-    TRAIN = 0
+    TRAIN = 1
 
     if TRAIN:
+        utils.printInBoldBlue("START TRAINING")
         dir_dict["now"] = datetime.now().strftime("%b%d_%H-%M-%S")
         dir_dict["save_dir"] = os.path.join("results", str(data), dir_dict["now"])
         dir_dict["tb_dir"] = os.path.join("runs", dir_dict["now"] + "_" + str(data))
@@ -101,15 +105,18 @@ def main():
             pickle.dump(args, f)
 
         train_net(data, args, dir_dict)
-        print(f"{dir_dict['save_dir']=}")
+        print(f"{dir_dict['save_dir'] = }")
     else:
+        utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug15_15-28-29", "cbf_qp_net.dict"
+            "results", str(data), "Aug16_10-52-43", "cbf_qp_net.dict"
         )
         infer_net(data, args, dir_dict)
+    print(args)
 
 
 def train_net(data, args, dir_dict=None):
+    os.system("pkill -f tensorboard")
     # Set up TensorBoard
     writer = SummaryWriter(dir_dict["tb_dir"], flush_secs=1)
     # Find the latest run directory
@@ -152,14 +159,14 @@ def train_net(data, args, dir_dict=None):
             data.train_num + data.valid_num + data.test_num,
         ),
     )
-    print(f"{len(train_dataset) =}; {len(valid_dataset) =}; {len(test_dataset) =}")
+    print(f"{len(train_dataset) = }; {len(valid_dataset) = }; {len(test_dataset) = }")
 
     # Compute ground truth averaged objective/loss
     train_truth_obj = compute_truth_obj(train_dataset)
     valid_truth_obj = compute_truth_obj(valid_dataset)
     test_truth_obj = compute_truth_obj(test_dataset)
 
-    print(f"{train_truth_obj =}; {valid_truth_obj =}; {test_truth_obj =}")
+    print(f"{train_truth_obj = }; {valid_truth_obj = }; {test_truth_obj = }")
 
     # To data batch
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -170,6 +177,8 @@ def train_net(data, args, dir_dict=None):
     cbf_qp_net = CbfQpNet(data, args)
     cbf_qp_net.to(DEVICE)
     optimizer = optim.Adam(cbf_qp_net.parameters(), lr=solver_step)
+    total_params = sum(p.numel() for p in cbf_qp_net.parameters())
+    print(f"Number of parameters: {total_params}")
 
     earlyStopper = EarlyStopping(
         patience=args["estop_patience"], delta=args["estop_delta"], verbose=True
@@ -209,7 +218,7 @@ def train_net(data, args, dir_dict=None):
             train_loss.sum().backward()
             optimizer.step()
             train_time = time.time() - start_time
-            # print(f"{train_time=}")
+            # print(f"{train_time = }")
             dict_agg(epoch_stats, "train_loss", train_loss.detach().cpu().numpy())
 
         utils.printInBoldBlue(
@@ -412,6 +421,5 @@ class CbfQpNet(nn.Module):
 
 
 if __name__ == "__main__":
-    os.system("pkill -f tensorboard")
     main()
     print()

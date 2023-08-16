@@ -18,6 +18,7 @@ torch.set_default_dtype(torch.float64)
 
 import numpy as np
 import osqp
+import cvxpy as cp
 from scipy.linalg import svd
 from scipy.sparse import csc_matrix
 
@@ -48,15 +49,7 @@ class QpProblem(ABC):
     A1, b1, A2, b2 come from constraintInpuMap
     """
 
-    def __init__(
-        self,
-        X,
-        xo_dim,
-        xc_dim,
-        y_dim,
-        valid_frac=0.0833,
-        test_frac=0.0833,
-    ):
+    def __init__(self, X, xo_dim, xc_dim, y_dim, valid_frac=0.0833, test_frac=0.0833):
         self._X = torch.tensor(X).unsqueeze(-1)
         self._P = None
         self._q = None
@@ -247,15 +240,10 @@ class QpProblem(ABC):
         self._A1, self._b1, *_ = torch.vmap(self.cstrInputMap)(Xc_)
         return self._A1, self._b1
 
-    def optimizationSolve(self, X, solver_type="osqp", tol=1e-4):
+    def optimizationSolve(self, X, solver_type="cvxpy_osqp", tol=1e-5):
         if solver_type == "osqp":
-            print("running osqp")
-            P, q, A1, b1 = (
-                self.P_np,
-                self.q_np,
-                self.A1_np,
-                self.b1_np,
-            )
+            utils.printInBoldBlue("running osqp")
+            P, q, A1, b1 = (self.P_np, self.q_np, self.A1_np, self.b1_np)
             X_np = X.detach().cpu().numpy()
             Y = []
             obj_val = []
@@ -273,8 +261,9 @@ class QpProblem(ABC):
                     l=my_l,
                     u=my_u,
                     verbose=False,
-                    eps_prim_inf=tol,
                     max_iter=100,
+                    eps_rel=tol,
+                    eps_abs=tol,
                 )
                 start_time = time.time()
                 results = solver.solve()
@@ -294,6 +283,41 @@ class QpProblem(ABC):
             parallel_opt_time = total_time / len(X_np)
             print(f"{parallel_opt_time=}")
 
+        elif solver_type == "cvxpy_osqp":
+            utils.printInBoldBlue("running cvxpy with osqp")
+            P, q, A1, b1 = (self.P_np, self.q_np, self.A1_np, self.b1_np)
+            X_np = X.detach().cpu().numpy()
+            Y = []
+            obj_val = []
+            total_time = 0
+            for i in range(self.nsamples):
+                y = cp.Variable((self.y_dim, 1))
+                prob = cp.Problem(
+                    cp.Minimize((1 / 2) * cp.quad_form(y, P[i]) + q[i].T @ y),
+                    [A1[i] @ y <= b1[i]],
+                )
+
+                start_time = time.time()
+                prob.solve(
+                    solver=cp.OSQP,
+                    verbose=False,
+                    max_iter=100,
+                    eps_rel=tol,
+                    eps_abs=tol,
+                )
+                end_time = time.time()
+
+                total_time += end_time - start_time
+                if prob.status == "optimal":
+                    Y.append(y.value.flatten())
+                    obj_val.append(prob.value)
+                else:
+                    Y.append(np.ones(self.y_dim) * np.nan)
+                    obj_val.append(np.nan)
+            sols = np.array(Y)
+            obj_val = np.array(obj_val)
+            parallel_opt_time = total_time / len(X_np)
+            print(f"{parallel_opt_time=}")
         else:
             raise NotImplementedError
 
@@ -307,107 +331,3 @@ class QpProblem(ABC):
         self._Y = torch.tensor(Y[feas_mask])
         self._obj_val = torch.tensor(obj_val[feas_mask])
         return Y
-
-
-###################################################################
-# TEST
-###################################################################
-class CbfQpProblem(QpProblem):
-    def __init__(self, X, xo_dim, xc_dim, y_dim, valid_frac=0.0833, test_frac=0.0833):
-        super().__init__(X, xo_dim, xc_dim, y_dim, valid_frac, test_frac)
-
-    def objInputMap(self, xo):
-        # xo is 3x1
-        P = torch.eye(self.xo_dim, self.xo_dim)
-        q = -xo
-        return P, q
-
-    def getBoundConstraint(self, xc):
-        dim = self.y_dim
-        t1 = torch.eye(dim, dim)
-        t2 = -torch.eye(dim, dim)
-        A = torch.cat((t1, t2), dim=0)
-        b = torch.ones(dim * 2, 1) * 0.5  # CHANGE
-        return A, b
-
-    def getCbfConstraint(self, xc):
-        # xc size (6, 1) including 3D pos and vel
-        dim = self.y_dim
-        alpha1 = 1.0
-        alpha2 = 1.0
-        pos_box = torch.ones(2 * dim, 1) * 1.2  # CHANGE
-        t1 = torch.eye(dim, dim)
-        t2 = torch.cat((torch.zeros(dim, dim), t1), dim=1)
-        t3 = torch.cat((t1, (torch.zeros(dim, dim))), dim=1)
-        vel_select = torch.cat((t2, -t2), dim=0)
-        pos_select = torch.cat((t3, -t3), dim=0)
-        A = torch.cat((t1, -t1), dim=0)
-        b = -(alpha1 + alpha2) * vel_select @ xc + alpha1 * alpha2 * (
-            pos_box - pos_select @ xc
-        )
-        return A, b
-
-    def cstrInputMap(self, xc):
-        A2, b2 = utils.getEmpty(), utils.getEmpty()
-        A1_bound, b1_bound = self.getBoundConstraint(xc)
-        A1_cbf, b1_cbf = self.getCbfConstraint(xc)
-        A1 = torch.cat((A1_bound, A1_cbf), dim=0)
-        b1 = torch.cat((b1_bound, b1_cbf), dim=0)
-        P, P_sqrt, q, r = utils.getNoneQuadraticConstraints()
-        M, s, c, d = utils.getNoneSocConstraints()
-        F = utils.getNoneLmiConstraints()
-        return A1, b1, A2, b2, P, P_sqrt, q, r, M, s, c, d, F
-
-
-def test():
-    num_samples = 2
-    xo_dim = 1  # nominal control u_bar dimension
-    xc_dim = 2  # state x dimension
-    y_dim = 1
-    # Xo = np.random.normal(0, 1, size=(num_samples, xo_dim))
-    Xo = np.array([[1.0], [-1.0]])
-    print(f"Xo = {Xo}")
-    # Xc = np.random.normal(0, 1, size=(num_samples, xc_dim))
-    Xc = np.array([[1.0, 0.3], [-1.0, -0.2]])
-    print(f"Xc = {Xc}")
-    X = np.hstack((Xo, Xc))
-    print(f"X = {X}")
-    problem = CbfQpProblem(
-        X,
-        xo_dim,
-        xc_dim,
-        y_dim,
-        valid_frac=0.1,
-        test_frac=0.1,
-    )
-    # print(f"{problem.X=}")
-    # print(f"{problem.Xo=}")
-    # print(f"{problem.Xc=}")
-    # print(f"{problem.X_np=}")
-    # print(f"{problem.Xo_np=}")
-    # print(f"{problem.Xc_np=}")
-    # print(f"{problem.trainX=}")
-    # print(f"{problem.validX=}")
-    # print(f"{problem.testX=}")
-    # print(f"{problem.nsamples=} {problem.x_dim=} {problem.xo_dim=} {problem.xc_dim=}")
-
-    problem.updateObjective()
-    # print(f"{problem.P=}")
-    # print(f"{problem.P_np=}")
-    # print(f"{problem.q=}")
-    # print(f"{problem.q_np=}")
-
-    loss = problem.objectiveFunction(problem.Xo)
-    # print(f"{loss=}")
-
-    problem.updateConstraints()
-    # print(f"{problem.A1=}")
-    print(f"{problem.b1=}")
-    # print(f"{problem.A1_np=}")
-
-    problem.calc_Y()
-    print(f"{problem.Y=}")
-
-
-if __name__ == "__main__":
-    test()
