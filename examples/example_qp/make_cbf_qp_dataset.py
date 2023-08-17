@@ -41,14 +41,14 @@ def check_balance(data, dataset):
 
 
 if __name__ == "__main__":
-    num_samples = 1
+    num_samples = 9000
     xo_dim = 2  # nominal control u_bar dimension
     y_dim = 2  # filtered control, output of the network
     pos_dim = 2
     vel_dim = 2
     xc_dim = pos_dim + vel_dim  # state x dimension
 
-    np.random.seed(1234)
+    np.random.seed(1999)
     # should normalize all input
     Xo = np.random.uniform(-1, 1.0, size=(num_samples, xo_dim))
     Xc_pos = np.random.uniform(-1, 1.0, size=(num_samples, pos_dim))
@@ -108,8 +108,8 @@ if __name__ == "__main__":
 
     print(train_dataset[1])
     print(problem.obj_val)
-    # with open(
-    #     "./data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(xo_dim, xc_dim, problem.nsamples),
-    #     "wb",
-    # ) as f:
-    #     pickle.dump(problem, f)
+    with open(
+        "./data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(xo_dim, xc_dim, problem.nsamples),
+        "wb",
+    ) as f:
+        pickle.dump(problem, f)

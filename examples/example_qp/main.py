@@ -38,6 +38,7 @@ from CbfQpProblem import CbfQpProblem
 
 # DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 DEVICE = torch.device("cpu")
+# torch.set_default_device(DEVICE)
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
@@ -59,8 +60,8 @@ def main():
         "loss_type": "unsupervised",
         "epochs": 200,
         "batch_size": 256,
-        "lr": 5e-6,
-        "hidden_size": 100,
+        "lr": 1e-6,
+        "hidden_size": 600,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
         "estop_patience": 5,
@@ -92,7 +93,7 @@ def main():
     data._device = DEVICE
     dir_dict = {}
 
-    TRAIN = 1
+    TRAIN = 0
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -109,7 +110,7 @@ def main():
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug16_10-52-43", "cbf_qp_net.dict"
+            "results", str(data), "Aug16_09-31-47", "cbf_qp_net.dict"
         )
         infer_net(data, args, dir_dict)
     print(args)
@@ -354,7 +355,7 @@ def infer_net(data, args, dir_dict=None):
         Ynn = model(X).item()
         total_time += time.time() - start_time
         Xo = X[0][0].item()
-        print(f"{Xo   = :.4f}")
+        # print(f"{Xo   = :.4f}")
         Yopt = Y.item()
         utils.printInBoldGreen(f"{Yopt = :.4f}\n{Ynn  = :.4f}")
         print("--")

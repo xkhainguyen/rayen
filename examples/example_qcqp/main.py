@@ -41,7 +41,7 @@ DEVICE = torch.device("cpu")
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
-seed = 19999
+seed = 1999
 torch.manual_seed(seed)
 np.random.seed(seed)
 
@@ -59,8 +59,8 @@ def main():
         "loss_type": "unsupervised",
         "epochs": 200,
         "batch_size": 256,
-        "lr": 2e-6,
-        "hidden_size": 700,
+        "lr": 10e-6,
+        "hidden_size": 800,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
         "estop_patience": 5,
@@ -92,7 +92,7 @@ def main():
     data._device = DEVICE
     dir_dict = {}
 
-    TRAIN = 1
+    TRAIN = 0
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -109,7 +109,7 @@ def main():
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug16_16-08-42", "model.dict"
+            "results", str(data), "Aug17_00-33-41", "model.dict"
         )
         infer_net(data, args, dir_dict)
     print(args)
@@ -356,13 +356,13 @@ def infer_net(data, args, dir_dict=None):
         X, Y, obj_val = test_dataset[idx]
         X = X.unsqueeze(0)
         start_time = time.time()
-        Ynn = model(X).item()
+        Ynn = model(X)
         total_time += time.time() - start_time
-        Xo = X[0][0].item()
-        print(f"{Xo   = :.4f}")
-        Yopt = Y.item()
-        utils.printInBoldGreen(f"{Yopt = :.4f}\n{Ynn  = :.4f}")
-        print("--")
+        # Xo = X[0][0].numpy()
+        # print(f"{Xo   = :.4f}")
+        # Yopt = Y.numpy()
+        # utils.printInBoldGreen(f"{Yopt = :.4f}\n{Ynn  = :.4f}")
+        # print("--")
 
     infer_time = total_time / 50
     print(f"{infer_time=}")

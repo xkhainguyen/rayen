@@ -324,7 +324,7 @@ class QpProblem(ABC):
         return sols, obj_val, total_time, parallel_opt_time
 
     def calc_Y(self):
-        Y, obj_val, *_ = self.optimizationSolve(self.X, tol=1e-8)
+        Y, obj_val, *_ = self.optimizationSolve(self.X, tol=1e-5)
         feas_mask = ~np.isnan(Y).all(axis=1)
         self._nsamples = feas_mask.sum()
         self._X = self._X[feas_mask]

@@ -21,10 +21,9 @@ DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 torch.set_default_dtype(torch.float64)
 
 with open(
-    "/home/khai/SSD/Code/rayen/examples/example_qp/results/QpProblem-1-2-8771/Aug15_15-54-17/args.dict",
+    "/home/khai/SSD/Code/rayen/examples/example_qp/results/QpProblem-1-2-18368/Aug16_09-31-47/args.dict",
     "rb",
 ) as f:
     data = pickle.load(f)
 
-print(f"{data['lr'] = }")
-print(f"{data['hidden_size'] = }")
+print(data)
