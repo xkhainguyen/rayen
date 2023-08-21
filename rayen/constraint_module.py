@@ -282,6 +282,7 @@ class ConstraintModule(torch.nn.Module):
         return True
 
     def getConstraintsInSubspaceCvxpy(self, z, y, params=None, epsilon=0.0):
+        print("getConstraintsInSubspaceCvxpy")
         NA_E, yp, A_p, b_p, *_ = params
         constraints = self.cs.lc.asCvxpySubspace(z, A_p, b_p, epsilon)
 

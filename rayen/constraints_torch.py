@@ -75,7 +75,9 @@ class LinearConstraints:
         return constraints
 
     def asCvxpySubspace(self, z, A_p, b_p, epsilon=0.0):
-        return [A_p @ z - b_p <= -epsilon * torch.ones((A_p.shape[0], 1))]
+        # print(torch.ones((A_p.shape[0], 1), device="cpu"))
+        print(A_p)
+        return [A_p @ z - b_p <= b_p]
 
 
 class ConvexQuadraticConstraints:

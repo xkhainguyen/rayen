@@ -41,7 +41,7 @@ def check_balance(data, dataset):
 
 
 if __name__ == "__main__":
-    num_samples = 9000
+    num_samples = 10
     xo_dim = 2  # nominal control u_bar dimension
     y_dim = 2  # filtered control, output of the network
     pos_dim = 2
@@ -108,6 +108,7 @@ if __name__ == "__main__":
 
     print(train_dataset[1])
     print(problem.obj_val)
+
     with open(
         "./data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(xo_dim, xc_dim, problem.nsamples),
         "wb",

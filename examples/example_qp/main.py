@@ -36,9 +36,9 @@ from examples.early_stopping import EarlyStopping
 # (the module it lives in and its name)
 from CbfQpProblem import CbfQpProblem
 
-# DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-DEVICE = torch.device("cpu")
-# torch.set_default_device(DEVICE)
+DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+# DEVICE = torch.device("cpu")
+torch.set_default_device(DEVICE)
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
@@ -53,12 +53,12 @@ def main():
     # Define problem
     args = {
         "prob_type": "cbf_qp",
-        "xo": 1,
-        "xc": 2,
-        "nsamples": 18368,
+        "xo": 2,
+        "xc": 4,
+        "nsamples": 10,
         "method": "RAYEN",
         "loss_type": "unsupervised",
-        "epochs": 200,
+        "epochs": 2,
         "batch_size": 256,
         "lr": 1e-6,
         "hidden_size": 600,
@@ -67,6 +67,8 @@ def main():
         "estop_patience": 5,
         "estop_delta": 0.05,  # improving rate of loss
         "seed": seed,
+        "device": DEVICE,
+        "board": False,
     }
     print(args)
 
@@ -93,7 +95,7 @@ def main():
     data._device = DEVICE
     dir_dict = {}
 
-    TRAIN = 0
+    TRAIN = 1
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -117,18 +119,20 @@ def main():
 
 
 def train_net(data, args, dir_dict=None):
-    os.system("pkill -f tensorboard")
-    # Set up TensorBoard
-    writer = SummaryWriter(dir_dict["tb_dir"], flush_secs=1)
-    # Find the latest run directory
-    latest_run = os.listdir("runs")[-1]
-    # Start TensorBoard for the latest run
-    subprocess.Popen(
-        [
-            f"python3 -m tensorboard.main --logdir={os.path.join('runs', latest_run)} --bind_all",
-        ],
-        shell=True,
-    )
+    board = args["board"]
+    if board:
+        os.system("pkill -f tensorboard")
+        # Set up TensorBoard
+        writer = SummaryWriter(dir_dict["tb_dir"], flush_secs=1)
+        # Find the latest run directory
+        latest_run = os.listdir("runs")[-1]
+        # Start TensorBoard for the latest run
+        subprocess.Popen(
+            [
+                f"python3 -m tensorboard.main --logdir={os.path.join('runs', latest_run)} --bind_all",
+            ],
+            shell=True,
+        )
 
     # Some parameters
     solver_step = args["lr"]
@@ -138,17 +142,12 @@ def train_net(data, args, dir_dict=None):
     # All data tensor
     dataset = TensorDataset(data.X, data.Y, data.obj_val)
 
-    ## First option
-    # train_dataset = TensorDataset(data.trainX)
-    # valid_dataset = TensorDataset(data.validX)
-    # test_dataset = TensorDataset(data.testX)
-
-    # Second option
+    # Option 1
     # train_dataset, valid_dataset, test_dataset = torch.utils.data.random_split(
     #     dataset, [data.train_num, data.valid_num, data.test_num]
     # )
 
-    ## Third option (already created with randomness). Keep the same order for infer_net
+    ## Option 2: (already created with randomness). Keep the same order for infer_net
     train_dataset = torch.utils.data.Subset(dataset, range(data.train_num))
     valid_dataset = torch.utils.data.Subset(
         dataset, range(data.train_num, data.train_num + data.valid_num)
@@ -235,16 +234,17 @@ def train_net(data, args, dir_dict=None):
         )
 
         # Print to TensorBoard
-        writer.add_scalars(
-            "loss",
-            {
-                "train": np.mean(epoch_stats["train_loss"]),
-                "valid": np.mean(epoch_stats["valid_loss"]),
-                "test": np.mean(epoch_stats["test_loss"]),
-            },
-            epoch,
-        )
-        writer.flush()
+        if board:
+            writer.add_scalars(
+                "loss",
+                {
+                    "train": np.mean(epoch_stats["train_loss"]),
+                    "valid": np.mean(epoch_stats["valid_loss"]),
+                    "test": np.mean(epoch_stats["test_loss"]),
+                },
+                epoch,
+            )
+            writer.flush()
 
         # Log all statistics
         if args["save_all_stats"]:
@@ -274,7 +274,8 @@ def train_net(data, args, dir_dict=None):
             )
             break
 
-    writer.close()
+    if board:
+        writer.close()
     return cbf_qp_net, stats
 
 
@@ -415,6 +416,7 @@ class CbfQpNet(nn.Module):
 
     def forward(self, x):
         x = x.squeeze(-1)
+        # y0 = self.rayen_layer.solveInteriorPoint()
         xv = self.nn_layer(x)
         xc = x[:, self._data.xo_dim : self._data.xo_dim + self._data.xc_dim]
         y = self.rayen_layer(xv, xc)
