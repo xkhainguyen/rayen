@@ -21,24 +21,24 @@ DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 torch.set_default_dtype(torch.float64)
 torch.set_default_device(DEVICE)
 
-# with open(
-#     "/home/khai/SSD/Code/rayen/examples/example_qp/results/QpProblem-1-2-18368/Aug16_09-31-47/args.dict",
-#     "rb",
-# ) as f:
-#     data = pickle.load(f)
+with open(
+    "/home/khai/SSD/Code/rayen/examples/example_qp/results/QpProblem-1-2-18368/Aug16_09-31-47/args.dict",
+    "rb",
+) as f:
+    data = pickle.load(f)
 
-# print(data)
+print(data)
 
-A1 = torch.tensor([[[0, 0], [0, 0]], [[1, 2], [3, 4.]]])
-print(A1.dtype)
-b1 = torch.tensor([[[2], [1]], [[2], [1.]]])
-# Yhat = torch.tensor([])
-Apinv = torch.linalg.pinv(A1)
-print(Apinv)
+# A1 = torch.tensor([[[0, 0], [0, 0]], [[1, 2], [3, 4.]]])
+# print(A1.dtype)
+# b1 = torch.tensor([[[2], [1]], [[2], [1.]]])
+# # Yhat = torch.tensor([])
+# Apinv = torch.linalg.pinv(A1)
+# print(Apinv)
 
-lstsq = torch.linalg.lstsq(A1, b1)
-yp = lstsq.solution
-print(f"{lstsq.residuals = }")
+# lstsq = torch.linalg.lstsq(A1, b1)
+# yp = lstsq.solution
+# print(f"{lstsq.residuals = }")
 
 # import cvxpy as cp
 # import numpy as np

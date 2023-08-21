@@ -18,6 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
 import pickle
+from tqdm import tqdm
 import time
 from datetime import datetime
 import os
@@ -46,6 +47,9 @@ seed = 1999
 torch.manual_seed(seed)
 np.random.seed(seed)
 
+print(f"{torch.get_num_threads() = }")
+print(f"{torch.get_num_interop_threads() = }")
+
 
 def main():
     utils.printInBoldBlue("CBF-QP Problem")
@@ -55,17 +59,17 @@ def main():
         "prob_type": "cbf_qp",
         "xo": 1,
         "xc": 2,
-        "nsamples": 18368,
+        "nsamples": 6385,
         "method": "RAYEN",
         "loss_type": "unsupervised",
-        "epochs": 20,
-        "batch_size": 256,
+        "epochs": 200,
+        "batch_size": 32,
         "lr": 1e-6,
-        "hidden_size": 600,
+        "hidden_size": 128,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
         "estop_patience": 5,
-        "estop_delta": 0.05,  # improving rate of loss
+        "estop_delta": 0.01,  # improving rate of loss
         "seed": seed,
         "device": DEVICE,
         "board": False,
@@ -214,6 +218,7 @@ def train_net(data, args, dir_dict=None):
         # Get train loss
         cbf_qp_net.train()
 
+        # for train_batch in tqdm(train_loader):
         for train_batch in train_loader:
             Xtrain = train_batch[0].to(args["device"])
             Ytrain = train_batch[1].to(args["device"]).unsqueeze(-1)
@@ -228,7 +233,7 @@ def train_net(data, args, dir_dict=None):
             dict_agg(epoch_stats, "train_loss", train_loss.detach().cpu().numpy())
 
         epoch_time = time.time() - epoch_start_time
-        print(f"{epoch_time = }")
+        # print(f"{epoch_time = }")
 
         utils.printInBoldBlue(
             "Epoch {}: train loss {:.4f}/{:.4f}, valid loss {:.4f}/{:.4f}, test loss {:.4f}/{:.4f}".format(
@@ -404,6 +409,7 @@ class CbfQpNet(nn.Module):
         # )
 
         layers = [
+            nn.BatchNorm1d(layer_sizes[0]),
             nn.Linear(layer_sizes[0], layer_sizes[1]),
             nn.ReLU(),
             nn.BatchNorm1d(layer_sizes[1]),
@@ -428,10 +434,11 @@ class CbfQpNet(nn.Module):
         )
 
     def forward(self, x):
-        x = x.squeeze(-1)
-        # y0 = self.rayen_layer.solveInteriorPoint()
+        # x is 3D
+        x = x.squeeze(-1)  # x becomes 2D for nn.Sequential forward
         xv = self.nn_layer(x)
         xc = x[:, self._data.xo_dim : self._data.xo_dim + self._data.xc_dim]
+        # xv and xc are 2D
         y = self.rayen_layer(xv, xc)
         return y
 

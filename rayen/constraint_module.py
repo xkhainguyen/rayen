@@ -673,6 +673,8 @@ class ConstraintModule(torch.nn.Module):
             violation = eigenvalues >= -eps * torch.ones(eigenvalues.shape)
             utils.verify(torch.all(violation), "LMI constraints not satisfied")
 
+        return True
+
     # def stackCholesky(self, A):
     #     output = torch.empty((0, self.k))
     #     for i in range(self.cs.num_qc):

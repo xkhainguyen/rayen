@@ -23,7 +23,6 @@ class ConstraintModule(torch.nn.Module):
      xc_dim: dimension of constraint input sample
      y_dim: dimension of output, ambient space
      method: method to use
-     num_cstr: number of each type of constraints
     """
 
     def __init__(

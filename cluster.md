@@ -1,4 +1,4 @@
-# How to use the ETH cluster Euler
+# How to run RAYEN on ETH cluster
 
 Read [Overview](https://docs.google.com/presentation/d/1y3iSIHqS2lKfDFyogOT1a8iEr3RIxxNjOJfKGM-5LAI/edit#slide=id.g27d9e0ee24_0_266) first
 
@@ -26,7 +26,7 @@ getent group MAVT-RSL-HPC
 After done with cluster access, start installing stuff
 
 ```bash
-module load gcc/8.2.0 cuda/11.0.3 vim/8.1.1746 eth_proxy gmp/6.1.2 
+module load gcc/8.2.0 cuda/11.0.3 vim/8.1.1746 eth_proxy gmp/6.1.2 tmux
 module save
 ```
 
@@ -47,11 +47,22 @@ cd rayen && pip install -e .
 pip install matplotlib
 ```
 
-Use [Slurm](https://scicomp.ethz.ch/wiki/LSF_to_Slurm_quick_reference) to work with jobs
+Use [Slurm](https://scicomp.ethz.ch/wiki/Using_the_batch_system) to work with jobs
 
-Interactive job
+Interactive job (--x11 for GUI display, not working now)
+[link 1](https://researchcomputing.princeton.edu/support/knowledge-base/scaling-analysis)
+[link 2](https://scicomp.ethz.ch/wiki/Using_the_batch_system#Parallel_job_submission)
 
 ```bash
-srun --pty -n 2 --x11 bash
-srun --pty -n 16 --mem-per-cpu=2048 --gpus=1 --gres=gpumem:10240 bash
+export OMP_NUM_THREADS=128
+# srun --pty -n 128 --mem-per-cpu=2048 --gpus=rtx_2080_ti:1 --time=8:00 bash
+srun --pty --ntasks=1 --cpus-per-task=128 --time=8:00:00 bash
+```
+
+To check CPU and GPU utilization
+
+```bash
+tmux
+htop
+nvidia-smi -lms 100 -q -d UTILIZATION
 ```

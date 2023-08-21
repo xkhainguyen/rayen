@@ -55,6 +55,7 @@ class QpProblem(ABC):
         self._q = None
         self._A1 = None
         self._b1 = None
+        self._Y0 = None
         self._Y = None
         self._obj_val = None
         self._x_dim = X.shape[1]
@@ -133,6 +134,10 @@ class QpProblem(ABC):
         return self.X[:, self.xo_dim : self.xo_dim + self.xc_dim]
 
     @property
+    def Y0(self):
+        return self._Y0
+
+    @property
     def Y(self):
         return self._Y
 
@@ -175,6 +180,10 @@ class QpProblem(ABC):
     @property
     def Y_np(self):
         return self.Y.detach().cpu().numpy()
+
+    @property
+    def Y0_np(self):
+        return self.Y0.detach().cpu().numpy()
 
     @property
     def valid_frac(self):
@@ -229,7 +238,7 @@ class QpProblem(ABC):
 
     ## For PyTorch
     def objectiveFunction(self, Y):
-        # shape (1, 1)
+        # shape (n, 1)
         return 0.5 * Y.transpose(-1, -2) @ self.P @ Y + self.q.transpose(-1, -2) @ Y
 
     def updateConstraints(self, Xc=None):
@@ -323,11 +332,15 @@ class QpProblem(ABC):
 
         return sols, obj_val, total_time, parallel_opt_time
 
-    def calc_Y(self):
-        Y, obj_val, *_ = self.optimizationSolve(self.X, tol=1e-5)
+    def computeY(self):
+        Y, obj_val, *_ = self.optimizationSolve(self.X, solver_type="osqp", tol=1e-5)
         feas_mask = ~np.isnan(Y).all(axis=1)
         self._nsamples = feas_mask.sum()
         self._X = self._X[feas_mask]
         self._Y = torch.tensor(Y[feas_mask])
         self._obj_val = torch.tensor(obj_val[feas_mask])
         return Y
+
+    def updateInteriorPoint(self, Y0):
+        self._Y0 = Y0
+        return True

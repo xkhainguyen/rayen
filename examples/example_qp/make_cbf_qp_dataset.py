@@ -41,11 +41,11 @@ def check_balance(data, dataset):
 
 
 if __name__ == "__main__":
-    num_samples = 10
-    xo_dim = 2  # nominal control u_bar dimension
-    y_dim = 2  # filtered control, output of the network
-    pos_dim = 2
-    vel_dim = 2
+    num_samples = 2000
+    xo_dim = 1  # nominal control u_bar dimension
+    y_dim = 1  # filtered control, output of the network
+    pos_dim = 1
+    vel_dim = 1
     xc_dim = pos_dim + vel_dim  # state x dimension
 
     np.random.seed(1999)
@@ -69,7 +69,7 @@ if __name__ == "__main__":
         # for i in range(2):
         xc = X[i : i + 1, xo_dim:].T
         A1, b1, *_ = problem.cstrInputMap(torch.tensor(xc))
-        for j in range(2):
+        for j in range(5):
             xoj = np.random.uniform(-1, 1.0, size=(xo_dim, 1))
             if torch.all((A1) @ torch.tensor(xoj) <= (b1)):
                 # print(xoj)
@@ -81,7 +81,7 @@ if __name__ == "__main__":
 
     problem.updateObjective()
     problem.updateConstraints()
-    problem.calc_Y()
+    problem.computeY()
     print(f"{len(problem.Y)=}")
 
     print(f"{problem.train_num=}; {problem.valid_num=}; {problem.test_num=}")

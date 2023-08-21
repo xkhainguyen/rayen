@@ -26,6 +26,7 @@ dependencies = [
 "scipy>=1.10.1",
 "torch>=1.13.1",
 "tqdm>=4.65.0",
+"tensorboard>=2.0",
 ]
 license = {file = "LICENSE"}
 
