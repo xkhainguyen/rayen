@@ -36,8 +36,8 @@ from examples.early_stopping import EarlyStopping
 # (the module it lives in and its name)
 from CbfQpProblem import CbfQpProblem
 
-DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-# DEVICE = torch.device("cpu")
+# DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+DEVICE = torch.device("cpu")
 torch.set_default_device(DEVICE)
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
@@ -53,9 +53,9 @@ def main():
     # Define problem
     args = {
         "prob_type": "cbf_qp",
-        "xo": 2,
-        "xc": 4,
-        "nsamples": 10,
+        "xo": 1,
+        "xc": 2,
+        "nsamples": 18368,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 2,
@@ -88,14 +88,14 @@ def main():
         var = getattr(data, attr)
         if not callable(var) and not attr.startswith("__") and torch.is_tensor(var):
             try:
-                setattr(data, attr, var.to(DEVICE))
+                setattr(data, attr, var.to(args["device"]))
             except AttributeError:
                 pass
 
-    data._device = DEVICE
+    data._device = args["device"]
     dir_dict = {}
 
-    TRAIN = 1
+    TRAIN = 0
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -169,13 +169,18 @@ def train_net(data, args, dir_dict=None):
     print(f"{train_truth_obj = }; {valid_truth_obj = }; {test_truth_obj = }")
 
     # To data batch
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        generator=torch.Generator(device=args["device"]),
+    )
     valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset))
     test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
 
     # Network
     cbf_qp_net = CbfQpNet(data, args)
-    cbf_qp_net.to(DEVICE)
+    cbf_qp_net.to(args["device"])
     optimizer = optim.Adam(cbf_qp_net.parameters(), lr=solver_step)
     total_params = sum(p.numel() for p in cbf_qp_net.parameters())
     print(f"Number of parameters: {total_params}")
@@ -194,23 +199,23 @@ def train_net(data, args, dir_dict=None):
             # Get valid loss
             cbf_qp_net.eval()
             for valid_batch in valid_loader:
-                Xvalid = valid_batch[0].to(DEVICE)
-                Yvalid = valid_batch[1].to(DEVICE)
+                Xvalid = valid_batch[0].to(args["device"])
+                Yvalid = valid_batch[1].to(args["device"])
                 eval_net(data, Xvalid, Yvalid, cbf_qp_net, args, "valid", epoch_stats)
 
             # Get test loss
             cbf_qp_net.eval()
             for test_batch in test_loader:
-                Xtest = test_batch[0].to(DEVICE)
-                Ytest = test_batch[1].to(DEVICE)
+                Xtest = test_batch[0].to(args["device"])
+                Ytest = test_batch[1].to(args["device"])
                 eval_net(data, Xtest, Ytest, cbf_qp_net, args, "test", epoch_stats)
 
         # Get train loss
         cbf_qp_net.train()
 
         for train_batch in train_loader:
-            Xtrain = train_batch[0].to(DEVICE)
-            Ytrain = train_batch[1].to(DEVICE).unsqueeze(-1)
+            Xtrain = train_batch[0].to(args["device"])
+            Ytrain = train_batch[1].to(args["device"]).unsqueeze(-1)
             start_time = time.time()
             optimizer.zero_grad(set_to_none=True)
             Yhat_train = cbf_qp_net(Xtrain)
@@ -344,6 +349,10 @@ def infer_net(data, args, dir_dict=None):
     model = CbfQpNet(data, args)
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
+
+    # Warm up the GPU
+    X_dummy = torch.Tensor(500, data.xo_dim + data.xc_dim).uniform_(-0.5, 0.5)
+    _ = model(X_dummy.to(args["device"]))
 
     total_time = 0.0
 

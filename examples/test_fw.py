@@ -4,6 +4,7 @@
 # --------------------------------------------------------------------------
 
 import numpy as np
+import random
 import torch
 import torch.nn as nn
 import math
@@ -14,6 +15,7 @@ import numpy as np
 import scipy
 import os
 import time
+import waitGPU
 
 import utils_examples
 from nonfixed_examples import RppExample
@@ -24,11 +26,16 @@ from rayen import constraints, constraint_module, utils
 np.set_printoptions(precision=2)
 
 # Set the default device to GPU if available, otherwise use CPU
-# device = "cuda" if torch.cuda.is_available() else "cpu"
-# torch.set_default_tensor_type(
-#     torch.cuda.FloatTensor if device == "cuda" else torch.FloatTensor
-# )
+device = "cuda" if torch.cuda.is_available() else "cpu"
+# device = "cpu"
+torch.set_default_tensor_type(
+    torch.cuda.FloatTensor if device == "cuda" else torch.FloatTensor
+)
 torch.set_default_dtype(torch.float64)
+
+seed = 1999
+torch.manual_seed(seed)
+np.random.seed(seed)
 
 method = "RAYEN"
 
@@ -42,17 +49,17 @@ my_layer = constraint_module.ConstraintModule(
     method=method,
     num_cstr=example.num_cstr,
     cstrInputMap=example.cstrInputMap,
-)
+).to(device)
 
 fig = plt.figure()
 fig.suptitle(method + ": " + example.name, fontsize=14)
 
-num_cstr_samples = 4
+num_cstr_samples = 1
 rows = math.ceil(math.sqrt(num_cstr_samples))
 cols = rows
 
 for i in range(num_cstr_samples):
-    num_samples = 300
+    num_samples = 1000
 
     # Define step input tensor
     xv_batched_x = torch.Tensor(num_samples, 1).uniform_(-2, 2) * 150
@@ -63,19 +70,17 @@ for i in range(num_cstr_samples):
     if example.xv_dim == 2:
         xv_batched = torch.cat((xv_batched_x, xv_batched_y), 1)
     # print(xv_batched)
-    # xv_batched = torch.tensor([[[10.0], [10.0], [10.0]]])
-
-    # xc_batched = torch.tensor([[1.0]]).unsqueeze(-1).repeat(num_samples, 1, 1)
-    # xc_batched = torch.tensor([[[1.0]]])
+    xv = torch.tensor([0.0, 10.5, 1.0])
+    xv_batched = xv.unsqueeze(0).repeat(num_samples, 1)
 
     # Define constraint input tensor
-    xc = torch.Tensor(example.xc_dim).uniform_(1, 5)
+    # xc = torch.Tensor(example.xc_dim).uniform_(1, 5)
     # print(xc)
-    # xc = torch.tensor([[10.0], [10.0]])
+    xc = torch.tensor([10.2, 10.1, 0.0, 3.0])
     xc_batched = xc.unsqueeze(0).repeat(num_samples, 1)
     # x_batched = torch.cat((xv_batched, xc_batched), 1)
 
-    # print(xv_batched)
+    print(xv_batched.device)
     # print(xc_batched)
     # print(x_batched)
 
@@ -88,9 +93,10 @@ for i in range(num_cstr_samples):
     # print(f"result = {result}")
     my_layer.isFeasible(result, 1e-8)
 
-    result = result.detach().numpy()
+    result = result.detach().cpu().numpy()
+    xc = xc.cpu()
 
-    y0 = my_layer.gety0()
+    y0 = my_layer.gety0().cpu()
 
     # print("FINISHED")
     # print(f"y0 = {y0}")
@@ -111,4 +117,4 @@ for i in range(num_cstr_samples):
         ax.scatter(y0[0, 0, 0], y0[0, 1, 0], y0[0, 2, 0], color="r", s=100)
         ax.scatter(result[:, 0, 0], result[:, 1, 0], result[:, 2, 0])
 
-plt.show()
+# plt.show()

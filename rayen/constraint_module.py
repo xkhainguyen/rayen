@@ -179,20 +179,22 @@ class ConstraintModule(torch.nn.Module):
                     b = torch.cat((b, b2, -b2), axis=1)
             else:
                 # Add the equality constraints as inequality constraints
-                A = torch.cat((A, A2, -A2), axis=1)
-                b = torch.cat((b, b2, -b2), axis=1)
+                A = torch.cat((A2, -A2), axis=1)
+                b = torch.cat((b2, -b2), axis=1)
 
             print_debug_info = 0
             if print_debug_info:
                 utils.printInBoldGreen(f"A is {A.shape} and b is {b.shape}")
 
             # TODO Preprocess
+            # Remove redundant constraints in A and b
+
             # Here we simply choose E such that
             # A_E == A2, b_E == b_2
             # A_I == A1, b_I == b_1
             if self.cs.has_linear_ineq_constraints:
                 start = A1.shape[1]
-            else:
+            elif self.cs.has_linear_ineq_constraints:
                 start = 0
             E = list(range(start, A.shape[1]))
 
@@ -206,6 +208,7 @@ class ConstraintModule(torch.nn.Module):
                 A_E = A[:, E, :]
                 b_E = b[:, E, :]
             else:
+                # 0z=0
                 A_E = torch.zeros(self.batch_size, 1, A.shape[2])
                 b_E = torch.zeros(self.batch_size, 1, 1)
 
@@ -213,8 +216,8 @@ class ConstraintModule(torch.nn.Module):
                 A_I = A[:, I, :]
                 b_I = b[:, I, :]
             else:
-                A_I = torch.zeros(self.batch_size, 1, A.shape[2])
                 # 0z<=1
+                A_I = torch.zeros(self.batch_size, 1, A.shape[2])
                 b_I = torch.ones(self.batch_size, 1, 1)
 
             if print_debug_info:
@@ -225,13 +228,21 @@ class ConstraintModule(torch.nn.Module):
 
             # Project into the nullspace of A_E
             ################################################
-            NA_E = nullSpace(A_E)
+            if len(E) > 0:
+                return NotImplementedError
+            else:
+                NA_E = nullSpace(A_E)
+                yp = torch.zeros(self.batch_size, self.k, 1)
+
             # print(f"NA_E = {NA_E}")
             # n = NA_E.shape[2]  # dimension of the subspace
 
             # Only take the half of A_E, b_E
-            yp = torch.linalg.lstsq(A_E[:, 0:1, :], b_E[:, 0:1, :]).solution
-            # print(f"yp = {yp}")
+            # https://pytorch.org/docs/stable/generated/torch.linalg.lstsq.html
+            # For CUDA input, the only valid driver is ‘gels’, which assumes that A is full-rank.
+            # lstsq = torch.linalg.lstsq(A_E[:, 0:1, :], b_E[:, 0:1, :])
+            # yp = lstsq.solution
+
             A_p = A_I @ NA_E
             b_p = b_I - A_I @ yp
 
@@ -259,8 +270,6 @@ class ConstraintModule(torch.nn.Module):
             # 0y<=1
             b_I = torch.ones(self.batch_size, 1, 1)
 
-        self.A_E = A_E
-        self.b_E = b_E
         self.A_I = A_I
         self.b_I = b_I
 
@@ -269,8 +278,6 @@ class ConstraintModule(torch.nn.Module):
         self.yp = yp
         self.NA_E = NA_E
 
-        # print(f"A_E = {self.A_E}")
-        # print(f"b_E = {self.b_E}")
         # print(f"A_I = {self.A_I}")
         # print(f"A_p = {self.A_p}")
         # print(f"b_p = {self.b_p}")
@@ -282,7 +289,7 @@ class ConstraintModule(torch.nn.Module):
         return True
 
     def getConstraintsInSubspaceCvxpy(self, z, y, params=None, epsilon=0.0):
-        print("getConstraintsInSubspaceCvxpy")
+        # print("getConstraintsInSubspaceCvxpy")
         NA_E, yp, A_p, b_p, *_ = params
         constraints = self.cs.lc.asCvxpySubspace(z, A_p, b_p, epsilon)
 
@@ -377,6 +384,7 @@ class ConstraintModule(torch.nn.Module):
 
     # Function to compute z0
     def solveInteriorPoint(self):
+        # print("solveInteriorPoint")
         params = [self.NA_E, self.yp, self.A_p, self.b_p]
         if self.cs.has_quadratic_constraints:
             params += [self.cs.qcs.P_sqrt, self.cs.qcs.q, self.cs.qcs.r]
@@ -384,6 +392,8 @@ class ConstraintModule(torch.nn.Module):
             params += [self.cs.socs.M, self.cs.socs.s, self.cs.socs.c, self.cs.socs.d]
         if self.cs.has_lmi_constraints:
             params += [self.cs.lmis.F]
+
+        # print(params)
 
         ip_z0, ip_epsilon, ip_y = self.ip_layer(
             *params,
@@ -514,6 +524,7 @@ class ConstraintModule(torch.nn.Module):
 
     # Forward pass for RAYEN
     def forwardForRAYEN(self, v):
+        # print("forwardForRAYEN")
         # Update Ap, bp, NA_E
         self.updateSubspaceConstraints()  # torch!!
 
