@@ -58,7 +58,7 @@ def main():
         "nsamples": 18368,
         "method": "RAYEN",
         "loss_type": "unsupervised",
-        "epochs": 2,
+        "epochs": 20,
         "batch_size": 256,
         "lr": 1e-6,
         "hidden_size": 600,
@@ -95,7 +95,7 @@ def main():
     data._device = args["device"]
     dir_dict = {}
 
-    TRAIN = 0
+    TRAIN = 1
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -194,6 +194,7 @@ def train_net(data, args, dir_dict=None):
     # For each epoch
     for epoch in range(nepochs):
         epoch_stats = {}  # statistics for this epoach
+        epoch_start_time = time.time()
 
         with torch.no_grad():
             # Get valid loss
@@ -225,6 +226,9 @@ def train_net(data, args, dir_dict=None):
             train_time = time.time() - start_time
             # print(f"{train_time = }")
             dict_agg(epoch_stats, "train_loss", train_loss.detach().cpu().numpy())
+
+        epoch_time = time.time() - epoch_start_time
+        print(f"{epoch_time = }")
 
         utils.printInBoldBlue(
             "Epoch {}: train loss {:.4f}/{:.4f}, valid loss {:.4f}/{:.4f}, test loss {:.4f}/{:.4f}".format(

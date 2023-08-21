@@ -53,4 +53,5 @@ Interactive job
 
 ```bash
 srun --pty -n 2 --x11 bash
+srun --pty -n 16 --mem-per-cpu=2048 --gpus=1 --gres=gpumem:10240 bash
 ```
