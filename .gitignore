@@ -165,3 +165,7 @@ cython_debug/
 
 examples/scripts/results
 examples/runs
+
+examples/example_qp/data/
+examples/example_qp/results/
+examples/example_qp/runs/
