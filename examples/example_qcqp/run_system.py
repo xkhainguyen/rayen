@@ -11,7 +11,7 @@ import torch.optim as optim
 import operator
 from functools import reduce
 from torch.utils.data import TensorDataset, DataLoader
-import matplotlib.pyplot as plt
+from matplotlib import pyplot as plt, patches
 from matplotlib.animation import FuncAnimation
 
 import numpy as np
@@ -32,23 +32,25 @@ from examples.early_stopping import EarlyStopping
 # pickle is lazy and does not serialize class definitions or function
 # definitions. Instead it saves a reference of how to find the class
 # (the module it lives in and its name)
-from CbfQpProblem import CbfQpProblem
+from CbfQcqpProblem import CbfQcqpProblem
 
 # DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 DEVICE = torch.device("cpu")
 # torch.set_default_device(DEVICE)
 torch.set_default_dtype(torch.float64)
-np.set_printoptions(precision=8)
+np.set_printoptions(precision=4)
 
 # generate axes object
 ax = plt.axes()
-ax.set_box_aspect(4e-2)
+ax.set_box_aspect(1)
 
 # set limits
 plt.xlim(-1, 1)
-# plt.ylim(-0.1, 0.1)
-plt.xlabel("Position")
-# plt.ylabel("Velocity")
+plt.ylim(-1, 1)
+plt.xlabel("Velocity x")
+plt.ylabel("Velocity y")
+circle1 = patches.Circle((0.0, 0.0), radius=1.0, color="red", fill=False)
+ax.add_patch(circle1)
 
 
 def main():
@@ -56,19 +58,19 @@ def main():
     print(f"{DEVICE = }")
     # Define problem
     args = {
-        "prob_type": "cbf_qp",
-        "xo": 1,
-        "xc": 2,
-        "nsamples": 18368,
+        "prob_type": "cbf_qcqp",
+        "xo": 2,
+        "xc": 4,
+        "nsamples": 11660,
         "method": "RAYEN",
-        "hidden_size": 600,
+        "hidden_size": 64,
     }
     print(args)
 
     # Load data, and put on GPU if needed
     prob_type = args["prob_type"]
-    if prob_type == "cbf_qp":
-        filepath = "data/cbf_qp_dataset_xo{}_xc{}_ex{}".format(
+    if prob_type == "cbf_qcqp":
+        filepath = "data/cbf_qcqp_dataset_xo{}_xc{}_ex{}".format(
             args["xo"], args["xc"], args["nsamples"]
         )
     else:
@@ -90,45 +92,46 @@ def main():
 
     utils.printInBoldBlue("START INFERENCE")
     dir_dict["infer_dir"] = os.path.join(
-        "results", str(data), "Aug16_09-31-47", "cbf_qp_net.dict"
+        "results", str(data), "Aug22_10-08-48", "model.dict"
     )
 
-    model = CbfQpNet(data, args)
+    model = CbfQcqpNet(data, args)
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
-    x0 = torch.Tensor([[[0.9]]])  # shape = (1, n, 1)
-    v0 = torch.Tensor([[[0.3]]])  # shape = (1, n, 1)
-    x0_n = torch.Tensor([[[0.9]]])  # shape = (1, n, 1)
-    v0_n = torch.Tensor([[[0.3]]])  # shape = (1, n, 1)
+    x0 = torch.Tensor([[[0.0], [0.0]]])  # shape = (1, n, 1)
+    v0 = torch.Tensor([[[0.65], [0.7]]])  # shape = (1, n, 1)
+    x0_n = torch.Tensor([[[0.0], [0.0]]])  # shape = (1, n, 1)
+    v0_n = torch.Tensor([[[0.65], [0.7]]])  # shape = (1, n, 1)
 
     system = DoubleIntegrator(x0, v0, 1e-2)
     system_n = DoubleIntegrator(x0_n, v0_n, 1e-2)
     u_filtered = None
     un_filtered = None
     with torch.no_grad():
-        for i in range(150):
+        for i in range(100):
             x, v = system.dynamics(u_filtered)
             xn, vn = system_n.dynamics(un_filtered)
-            print(f"{x = }; {v = }")
-            print(f"{xn = }; {vn = }")
-            print(torch.norm(x - xn))
+            print(f"{x.squeeze() = }; {v.squeeze() = }")
+            print(f"{xn.squeeze() = }; {vn.squeeze() = }")
+
+            print(torch.norm(v - vn))
 
             # u_nom = torch.distributions.uniform.Uniform(-1, 1.0).sample(
             #     [1, args["xo"], 1]
             # )  # (1, n, 1)
-            u_nom = 1.5 * torch.tensor([[[np.cos(i / 3)]]])
-            # u_nom = torch.tensor([[[2.0]]])
+            u_nom = 2 * torch.tensor([[[np.cos(i / 20)], [np.sin(i / 20)]]])
+            # u_nom = torch.tensor([[[2.0], [2.0]]])
 
             un_filtered = nn_infer(model, xn, vn, u_nom)
             u_filtered = opt_solve(x, v, u_nom)
 
-            print(f"{u_nom = }; {u_filtered = }")
-            print(f"{u_nom = }; {un_filtered = } \n")
+            print(f"{u_nom.squeeze() = }; {u_filtered.squeeze() = }")
+            print(f"{u_nom.squeeze() = }; {un_filtered.squeeze() = } \n")
 
             # add something to axes
-            ax.scatter(x, 0, s=100.0, c="blue")
-            ax.scatter(xn, 0, s=100.0, c="red", alpha=0.5)
+            ax.scatter(v.squeeze()[0], v.squeeze()[1], s=100.0, c="blue")
+            ax.scatter(vn.squeeze()[0], vn.squeeze()[1], s=100.0, c="red", alpha=0.5)
 
             # draw the plot
             plt.draw()
@@ -137,7 +140,7 @@ def main():
             # start removing points if you don't want all shown
             if i > 0:
                 ax.collections[0].remove()
-                plt.legend(["nn", "opt"], loc=2)
+                plt.legend(["limit", "nn", "opt"], loc=2)
                 ax.collections[1].remove()
 
 
@@ -150,13 +153,13 @@ def nn_infer(model, xn, vn, u_nom):
 
 def opt_solve(x, v, u_nom):
     xc = torch.cat([u_nom, x, v], 1).squeeze(-1)
-    problem = CbfQpProblem(xc, 1, 2, 1)
+    problem = CbfQcqpProblem(xc, 2, 4, 2)
     problem.updateObjective()
     problem.updateConstraints()
-    problem.computeY()
+    problem.calc_Y()
     u_filtered = problem.Y
     u_filtered.nelement() == 0 and utils.printInBoldRed("Solver failed")
-    return u_filtered
+    return u_filtered.unsqueeze(-1)
 
 
 ###################################################################
@@ -196,7 +199,7 @@ class DoubleIntegrator:
 ###################################################################
 # MODEL
 ###################################################################
-class CbfQpNet(nn.Module):
+class CbfQcqpNet(nn.Module):
     def __init__(self, data, args):
         super().__init__()
         self._data = data
@@ -221,7 +224,7 @@ class CbfQpNet(nn.Module):
         layers = [
             nn.Linear(layer_sizes[0], layer_sizes[1]),
             nn.ReLU(),
-            nn.BatchNorm1d(layer_sizes[1]),
+            # nn.BatchNorm1d(layer_sizes[1]),
             nn.Linear(layer_sizes[1], layer_sizes[2]),
             nn.ReLU(),
             nn.Linear(layer_sizes[1], layer_sizes[2]),

@@ -21,7 +21,7 @@ DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 torch.set_default_dtype(torch.float64)
 
 with open(
-    "/home/khai/SSD/Code/rayen/examples/example_qcqp/results/QcqpProblem-2-4-11660/Aug17_00-33-41/args.dict",
+    "/home/khai/SSD/Code/rayen/examples/example_qcqp/results/QcqpProblem-2-4-11660/Aug22_10-08-48/args.dict",
     "rb",
 ) as f:
     data = pickle.load(f)

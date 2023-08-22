@@ -139,10 +139,10 @@ if __name__ == "__main__":
     print(f"{problem.Y0 = }")
     print(f"{layer.isFeasible(problem.Y0, 1e-4)}")
 
-    # with open(
-    #     "./data/cbf_qp_dataset2_xo{}_xc{}_ex{}".format(
-    #         xo_dim, xc_dim, problem.nsamples
-    #     ),
-    #     "wb",
-    # ) as f:
-    #     pickle.dump(problem, f)
+    with open(
+        "./data/cbf_qp_dataset2_xo{}_xc{}_ex{}".format(
+            xo_dim, xc_dim, problem.nsamples
+        ),
+        "wb",
+    ) as f:
+        pickle.dump(problem, f)

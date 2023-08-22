@@ -58,9 +58,9 @@ def main():
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 200,
-        "batch_size": 256,
-        "lr": 10e-6,
-        "hidden_size": 800,
+        "batch_size": 64,
+        "lr": 1e-5,
+        "hidden_size": 64,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
         "estop_patience": 5,
@@ -109,7 +109,7 @@ def main():
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug17_00-33-41", "model.dict"
+            "results", str(data), "Aug22_10-08-48", "model.dict"
         )
         infer_net(data, args, dir_dict)
     print(args)
@@ -351,20 +351,20 @@ def infer_net(data, args, dir_dict=None):
     total_time = 0.0
 
     num = len(test_dataset)
-    for i in range(50):
+    for i in range(128):
         idx = np.random.randint(0, num)
         X, Y, obj_val = test_dataset[idx]
         X = X.unsqueeze(0)
         start_time = time.time()
-        Ynn = model(X)
+        Ynn = model(X).squeeze().numpy()
         total_time += time.time() - start_time
-        # Xo = X[0][0].numpy()
-        # print(f"{Xo   = :.4f}")
-        # Yopt = Y.numpy()
-        # utils.printInBoldGreen(f"{Yopt = :.4f}\n{Ynn  = :.4f}")
-        # print("--")
+        Xo = X.squeeze().numpy()
+        print(f"{Xo   = }")
+        Yopt = Y.numpy()
+        utils.printInBoldGreen(f"{Yopt = }\n{Ynn  = }")
+        print("--")
 
-    infer_time = total_time / 50
+    infer_time = total_time / 128
     print(f"{infer_time=}")
 
 
@@ -396,7 +396,7 @@ class CbfQcqpNet(nn.Module):
         layers = [
             nn.Linear(layer_sizes[0], layer_sizes[1]),
             nn.ReLU(),
-            nn.BatchNorm1d(layer_sizes[1]),
+            # nn.BatchNorm1d(layer_sizes[1]),
             nn.Linear(layer_sizes[1], layer_sizes[2]),
             nn.ReLU(),
             nn.Linear(layer_sizes[1], layer_sizes[2]),

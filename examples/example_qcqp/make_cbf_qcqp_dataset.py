@@ -41,7 +41,7 @@ def check_balance(data, dataset):
 
 
 if __name__ == "__main__":
-    num_samples = 200
+    num_samples = 8000
     xo_dim = 2  # nominal control u_bar dimension
     y_dim = 2  # filtered control, output of the network
     pos_dim = 2
@@ -108,12 +108,12 @@ if __name__ == "__main__":
     print(train_dataset[2])
     print(problem.obj_val)
 
-    if not os.path.exists("./data"):
-        os.makedirs("./data")
-    with open(
-        "./data/cbf_qcqp_dataset_xo{}_xc{}_ex{}".format(
-            xo_dim, xc_dim, problem.nsamples
-        ),
-        "wb",
-    ) as f:
-        pickle.dump(problem, f)
+    # if not os.path.exists("./data"):
+    #     os.makedirs("./data")
+    # with open(
+    #     "./data/cbf_qcqp_dataset_xo{}_xc{}_ex{}".format(
+    #         xo_dim, xc_dim, problem.nsamples
+    #     ),
+    #     "wb",
+    # ) as f:
+    #     pickle.dump(problem, f)
