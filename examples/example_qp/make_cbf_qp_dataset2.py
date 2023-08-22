@@ -49,7 +49,7 @@ def check_balance(problem, dataset):
 
 if __name__ == "__main__":
     utils.printInBoldBlue("Generating dataset")
-    num_samples = 2000
+    num_samples = 5000
     xo_dim = 1  # nominal control u_bar dimension
     y_dim = 1  # filtered control, output of the network
     pos_dim = 1
@@ -131,15 +131,18 @@ if __name__ == "__main__":
 
     utils.printInBoldBlue("finding interior points with cvxpylayers")
     # xv can arbitrary
+    # Xo = torch.tensor([[1.1], [2.0]])
+    # Xc = torch.tensor([[0.8, 0.1], [0.7, 0.6]])
+    # Y = layer(Xo, Xc)  # 3D
     Y = layer(problem.Xo.squeeze(-1), problem.Xc.squeeze(-1))  # 3D
     problem.updateInteriorPoint(layer.z0)  # 3D
-    print(f"{problem.Y0[0] = }")
-    print(f"{layer.isFeasible(problem.Y0, 1e-2)}")
+    print(f"{problem.Y0 = }")
+    print(f"{layer.isFeasible(problem.Y0, 1e-4)}")
 
-    with open(
-        "./data/cbf_qp_dataset2_xo{}_xc{}_ex{}".format(
-            xo_dim, xc_dim, problem.nsamples
-        ),
-        "wb",
-    ) as f:
-        pickle.dump(problem, f)
+    # with open(
+    #     "./data/cbf_qp_dataset2_xo{}_xc{}_ex{}".format(
+    #         xo_dim, xc_dim, problem.nsamples
+    #     ),
+    #     "wb",
+    # ) as f:
+    #     pickle.dump(problem, f)

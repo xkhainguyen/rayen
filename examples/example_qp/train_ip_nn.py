@@ -58,18 +58,18 @@ def main():
     args = {
         "xo": 1,
         "xc": 2,
-        "nsamples": 6385,
+        "nsamples": 12869,
         "epochs": 200,
-        "batch_size": 128,
-        "lr": 1e-5,
-        "hidden_size": 64,
+        "batch_size": 256,
+        "lr": 5e-6,
+        "hidden_size": 128,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
         "estop_patience": 5,
         "estop_delta": 0.01,  # improving rate of loss
         "seed": seed,
         "device": DEVICE,
-        "board": False,
+        "board": True,
     }
     print(args)
 
@@ -92,7 +92,7 @@ def main():
     data._device = args["device"]
     dir_dict = {}
 
-    TRAIN = 1
+    TRAIN = 0
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -113,7 +113,7 @@ def main():
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", "ipnn", str(data), "Aug16_09-31-47", "model.dict"
+            "results", "ipnn", str(data), "Aug21_23-02-08", "model.dict"
         )
         infer_net(data, args, dir_dict)
     print(args)
@@ -130,7 +130,7 @@ def train_net(data, args, dir_dict=None):
         # Start TensorBoard for the latest run
         subprocess.Popen(
             [
-                f"python3 -m tensorboard.main --logdir={os.path.join('runs','ipnn', latest_run)} --bind_all",
+                f"python3 -m tensorboard.main --logdir={os.path.join('runs','ipnn')} --bind_all",
             ],
             shell=True,
         )
@@ -320,7 +320,7 @@ def eval_net(data, X, Y, net, args, prefix, stats):
 def infer_net(data, args, dir_dict=None):
     "Intuitvely evaluate random test data by inference"
 
-    dataset = TensorDataset(data.X, data.Y, data.obj_val)
+    dataset = TensorDataset(data.Xc, data.Y0)
     test_dataset = torch.utils.data.Subset(
         dataset,
         range(
@@ -333,7 +333,7 @@ def infer_net(data, args, dir_dict=None):
     model.eval()
 
     # Warm up the GPU
-    X_dummy = torch.Tensor(500, data.xo_dim + data.xc_dim).uniform_(-0.5, 0.5)
+    X_dummy = torch.Tensor(500, data.xc_dim, 1).uniform_(-0.5, 0.5)
     _ = model(X_dummy.to(args["device"]))
 
     total_time = 0.0
@@ -341,15 +341,15 @@ def infer_net(data, args, dir_dict=None):
     num = len(test_dataset)
     for i in range(50):
         idx = np.random.randint(0, num)
-        X, Y, obj_val = test_dataset[idx]
+        X, Y0 = test_dataset[idx]
         X = X.unsqueeze(0)
         start_time = time.time()
         Ynn = model(X).item()
         total_time += time.time() - start_time
         Xo = X[0][0].item()
         # print(f"{Xo   = :.4f}")
-        Yopt = Y.item()
-        utils.printInBoldGreen(f"{Yopt = :.4f}\n{Ynn  = :.4f}")
+        Y0 = Y0.item()
+        utils.printInBoldGreen(f"{Y0 = :.4f}\n{Ynn  = :.4f}")
         print("--")
 
     infer_time = total_time / 50
@@ -390,6 +390,7 @@ class IpNet(nn.Module):
             # nn.BatchNorm1d(layer_sizes[2]),
             nn.ReLU(),
             nn.Linear(layer_sizes[2], 1),
+            nn.Dropout(p=0.1),
         ]
 
         for layer in layers:

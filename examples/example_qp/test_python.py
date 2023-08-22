@@ -22,7 +22,7 @@ torch.set_default_dtype(torch.float64)
 torch.set_default_device(DEVICE)
 
 with open(
-    "/home/khai/SSD/Code/rayen/examples/example_qp/results/QpProblem-1-2-18368/Aug16_09-31-47/args.dict",
+    "/home/khai/SSD/Code/rayen/examples/example_qp/results/ipnn/QpProblem-1-2-12869/Aug21_23-02-08/args.dict",
     "rb",
 ) as f:
     data = pickle.load(f)

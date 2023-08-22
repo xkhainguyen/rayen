@@ -44,7 +44,7 @@ class EarlyStopping:
         if self.best_score is None:
             self.best_score = score
             self.save_checkpoint(val_loss, model, stats, path)
-        elif score < self.best_score * (1 + self.delta):
+        elif score < self.best_score * (1 + self.delta * np.sign(score)):
             self.counter += 1
             if self.verbose:
                 self.trace_func(

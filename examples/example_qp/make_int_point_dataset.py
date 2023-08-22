@@ -72,16 +72,18 @@ if __name__ == "__main__":
     data.updateConstraints()
 
     layer = constraint_module.ConstraintModule(
-        data.y_dim,
-        data.xc_dim,
-        data.y_dim,
+        1,
+        2,
+        1,
         "RAYEN",
         data.num_cstr,
         data.cstrInputMap,
     )
-
+    Xo = torch.tensor([[[2.1]], [[2.0]]])
+    Xc = torch.tensor([[[1.0], [0.8]], [[1.0], [0.8]]])
     # xv can arbitrary
-    Y = layer(data.Xo.squeeze(-1), data.Xc.squeeze(-1))  # 3D
+    # Y = layer(data.Xo.squeeze(-1), data.Xc.squeeze(-1))  # 3D
+    Y = layer(Xo, Xc)
     Y0 = layer.z0  # 3D
     print(f"{Y0[0] = }")
     print(f"{layer.isFeasible(Y0, 1e-2)}")

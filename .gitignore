@@ -169,3 +169,7 @@ examples/runs
 examples/example_qp/data/
 examples/example_qp/results/
 examples/example_qp/runs/
+
+examples/example_qcqp/data/
+examples/example_qcqp/results/
+examples/example_qcqp/runs/

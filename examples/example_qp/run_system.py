@@ -11,6 +11,8 @@ import torch.optim as optim
 import operator
 from functools import reduce
 from torch.utils.data import TensorDataset, DataLoader
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 
 import numpy as np
 import pickle
@@ -37,6 +39,16 @@ DEVICE = torch.device("cpu")
 # torch.set_default_device(DEVICE)
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
+
+# generate axes object
+ax = plt.axes()
+
+
+# set limits
+plt.xlim(-1, 1)
+plt.ylim(-1, 1)
+plt.xlabel("Position")
+plt.ylabel("Velocity")
 
 
 def main():
@@ -85,21 +97,61 @@ def main():
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
-    x0 = torch.Tensor([[[0.0]]])  # shape = (1, n, 1)
-    v0 = torch.Tensor([[[0.0]]])  # shape = (1, n, 1)
-    system = DoubleIntegrator(x0, v0, 1e-6)
+    x0 = torch.Tensor([[[0.8]]])  # shape = (1, n, 1)
+    v0 = torch.Tensor([[[0.3]]])  # shape = (1, n, 1)
+
+    system = DoubleIntegrator(x0, v0, 1e-2)
+    system_n = DoubleIntegrator(x0, v0, 1e-2)
     u_filtered = None
+    un_filtered = None
     with torch.no_grad():
-        for i in range(10):
+        for i in range(150):
             x, v = system.dynamics(u_filtered)
-            u_nom = torch.distributions.uniform.Uniform(-1, 1.0).sample(
-                [1, args["xo"], 1]
-            )  # (1, n, 1)
-            input = torch.cat((u_nom, x, v), dim=1)
-            print(input)
+            xn, vn = system_n.dynamics(un_filtered)
             print(f"{x = }; {v = }")
-            u_filtered = model(input)
+            print(f"{xn = }; {vn = }")
+            # u_nom = torch.distributions.uniform.Uniform(-1, 1.0).sample(
+            #     [1, args["xo"], 1]
+            # )  # (1, n, 1)
+            u_nom = 1.5 * torch.tensor([[[np.cos(i / 3)]]])
+            # u_nom = torch.tensor([[[2.0]]])
+            un_filtered = nn_infer(model, xn, vn, u_nom)
+            u_filtered = opt_solve(x, v, u_nom)
+
             print(f"{u_nom = }; {u_filtered = }")
+            print(f"{u_nom = }; {un_filtered = } \n")
+
+            # add something to axes
+            ax.scatter(x, v, s=100.0, c="blue")
+            ax.scatter(xn, vn, s=100.0, c="red", alpha=0.5)
+
+            # draw the plot
+            plt.draw()
+            plt.pause(0.2)  # is necessary for the plot to update for some reason
+
+            # start removing points if you don't want all shown
+            if i > 0:
+                ax.collections[0].remove()
+                plt.legend(["nn", "opt"])
+                ax.collections[1].remove()
+
+
+def nn_infer(model, xn, vn, u_nom):
+    input_n = torch.cat((u_nom, xn, vn), dim=1)
+    un_filtered = model(input_n)
+    un_filtered.nelement() == 0 and utils.printInBoldRed("NN failed")
+    return un_filtered
+
+
+def opt_solve(x, v, u_nom):
+    xc = torch.cat([u_nom, x, v], 1).squeeze(-1)
+    problem = CbfQpProblem(xc, 1, 2, 1)
+    problem.updateObjective()
+    problem.updateConstraints()
+    problem.computeY()
+    u_filtered = problem.Y
+    u_filtered.nelement() == 0 and utils.printInBoldRed("Solver failed")
+    return u_filtered
 
 
 ###################################################################

@@ -133,9 +133,9 @@ class QpProblem(ABC):
     def Xc(self):
         return self.X[:, self.xo_dim : self.xo_dim + self.xc_dim]
 
-    @property
-    def Y0(self):
-        return self._Y0
+    # @property
+    # def Y0(self):
+    #     return self._Y0
 
     @property
     def Y(self):
@@ -181,9 +181,9 @@ class QpProblem(ABC):
     def Y_np(self):
         return self.Y.detach().cpu().numpy()
 
-    @property
-    def Y0_np(self):
-        return self.Y0.detach().cpu().numpy()
+    # @property
+    # def Y0_np(self):
+    #     return self.Y0.detach().cpu().numpy()
 
     @property
     def valid_frac(self):
@@ -341,6 +341,6 @@ class QpProblem(ABC):
         self._obj_val = torch.tensor(obj_val[feas_mask])
         return Y
 
-    def updateInteriorPoint(self, Y0):
-        self._Y0 = Y0
-        return True
+    # def updateInteriorPoint(self, Y0):
+    #     self._Y0 = Y0
+    #     return True
