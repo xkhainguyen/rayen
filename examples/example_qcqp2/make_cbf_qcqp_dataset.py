@@ -19,11 +19,18 @@ import os
 sys.path.insert(1, os.path.join(sys.path[0], os.pardir, os.pardir))
 
 from CbfQcqpProblem import CbfQcqpProblem
-from rayen import utils
+from rayen import utils, constraint_module, constraints_torch
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 
+DEVICE = torch.device("cpu")
+torch.set_default_device(DEVICE)
 torch.set_default_dtype(torch.float64)
+np.set_printoptions(precision=4)
+
+seed = 1999
+torch.manual_seed(seed)
+np.random.seed(seed)
 
 
 def check_balance(data, dataset):
@@ -41,7 +48,8 @@ def check_balance(data, dataset):
 
 
 if __name__ == "__main__":
-    num_samples = 20
+    utils.printInBoldBlue("Generating dataset")
+    num_samples = 50
     xo_dim = 2  # nominal control u_bar dimension
     y_dim = 2  # filtered control, output of the network
     pos_dim = 2
@@ -74,49 +82,64 @@ if __name__ == "__main__":
     #         if torch.all((A1) @ torch.tensor(xoj) <= (b1)):
     #             # print(xoj)
     #             X = np.vstack([X, np.vstack([xoj, xc]).T])
-    np.random.shuffle(X)
-    problem = CbfQcqpProblem(X, xo_dim, xc_dim, y_dim, valid_frac=0.1, test_frac=0.1)
 
-    problem.updateObjective()
+    np.random.shuffle(X)
+
+    problem = CbfQcqpProblem(X, xo_dim, xc_dim, y_dim, valid_frac=0.1, test_frac=0.1)
     problem.updateConstraints()
-    problem.calc_Y(tol=1e-8)
+
+    layer = constraint_module.ConstraintModule(
+        problem.y_dim,
+        problem.xc_dim,
+        problem.y_dim,
+        "RAYEN",
+        problem.num_cstr,
+        problem.cstrInputMap,
+    )
+
+    utils.printInBoldBlue("finding solution with numerical solvers")
+    problem.updateObjective()
+    problem.computeY(tol=1e-8)
     print(f"{len(problem.Y)=}")
 
     print(f"{problem.train_num=}; {problem.valid_num=}; {problem.test_num=}")
 
-    data = problem
-
     # All data tensor
-    dataset = TensorDataset(data.X, data.Y)
-    train_dataset = torch.utils.data.Subset(dataset, range(data.train_num))
+    dataset = TensorDataset(problem.X, problem.Y)
+    train_dataset = torch.utils.data.Subset(dataset, range(problem.train_num))
     valid_dataset = torch.utils.data.Subset(
-        dataset, range(data.train_num, data.train_num + data.valid_num)
+        dataset, range(problem.train_num, problem.train_num + problem.valid_num)
     )
     test_dataset = torch.utils.data.Subset(
         dataset,
         range(
-            data.train_num + data.valid_num,
-            data.train_num + data.valid_num + data.test_num,
+            problem.train_num + problem.valid_num,
+            problem.train_num + problem.valid_num + problem.test_num,
         ),
     )
 
-    check_balance(data, train_dataset)
-    check_balance(data, valid_dataset)
-    check_balance(data, test_dataset)
+    check_balance(problem, train_dataset)
+    check_balance(problem, valid_dataset)
+    check_balance(problem, test_dataset)
 
     # print(train_dataset[0])
-    # print(train_dataset[2])
-    # print(problem.obj_val)
-
     for i in range(num_samples):
-        print(i, dataset[i])
-        assert torch.norm(dataset[i][1]) < 1.01
-    # if not os.path.exists("./data"):
-    #     os.makedirs("./data")
-    # with open(
-    #     "./data/cbf_qcqp_dataset_xo{}_xc{}_ex{}".format(
-    #         xo_dim, xc_dim, problem.nsamples
-    #     ),
-    #     "wb",
-    # ) as f:
-    #     pickle.dump(problem, f)
+        print(train_dataset[i])
+    print(problem.obj_val)
+
+    utils.printInBoldBlue("finding interior points with cvxpylayers")
+    # xv can arbitrary
+    Y = layer(problem.Xo.squeeze(-1), problem.Xc.squeeze(-1))  # Y is 3D
+    problem.updateInteriorPoint(layer.z0)  # 3D
+    print(f"{problem.Y0.shape = }; \n{problem.Y0[0] = }")
+    print(f"{layer.isFeasible(problem.Y0, 1e-4)}")
+
+    if not os.path.exists("./data"):
+        os.makedirs("./data")
+    with open(
+        "./data/cbf_qcqp_dataset_xo{}_xc{}_ex{}".format(
+            xo_dim, xc_dim, problem.nsamples
+        ),
+        "wb",
+    ) as f:
+        pickle.dump(problem, f)

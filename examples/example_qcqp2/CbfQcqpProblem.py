@@ -28,7 +28,7 @@ torch.set_default_dtype(torch.float64)
 class CbfQcqpProblem(QcqpProblem):
     def __init__(self, X, xo_dim, xc_dim, y_dim, valid_frac=0.0833, test_frac=0.0833):
         super().__init__(X, xo_dim, xc_dim, y_dim, valid_frac, test_frac)
-        self.num_cstr = [0, 0, 1, 0, 0]  # just linear constraints
+        self.num_cstr = [0, 0, 1, 0, 0]  # just linear + quadratic constraints
 
     def objInputMap(self, xo):
         # xo is 3x1

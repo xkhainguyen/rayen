@@ -67,6 +67,7 @@ class QcqpProblem(ABC):
         self._q = None
         self._r = None
         self._b1 = None
+        self._Y0 = None
         self._Y = None
         self._obj_val = None
         self._x_dim = X.shape[1]
@@ -292,7 +293,6 @@ class QcqpProblem(ABC):
             self._r,
             *_,
         ) = torch.vmap(self.cstrInputMap)(Xc_)
-        print(torch.vmap(self.cstrInputMap)(Xc_))
         return self._A1, self._b1, self._P, self._P_sqrt, self._q, self._r
 
     def optimizationSolve(self, X, solver_type="cvxpy_ecos", tol=1e-5):
@@ -347,12 +347,25 @@ class QcqpProblem(ABC):
 
         return sols, obj_val, total_time, parallel_opt_time
 
-    def calc_Y(self, tol):
-        Y, obj_val, *_ = self.optimizationSolve(self.X, tol=tol)
+    def computeY(self, tol=1e-8):
+        Y, obj_val, *_ = self.optimizationSolve(
+            self.X, solver_type="cvxpy_ecos", tol=tol
+        )
         feas_mask = ~np.isnan(Y).all(axis=1)
-        print(feas_mask)
         self._nsamples = feas_mask.sum()
         self._X = self._X[feas_mask]
         self._Y = torch.tensor(Y[feas_mask])
         self._obj_val = torch.tensor(obj_val[feas_mask])
         return Y
+
+    @property
+    def Y0_np(self):
+        return self.Y0.detach().cpu().numpy()
+
+    @property
+    def Y0(self):
+        return self._Y0
+
+    def updateInteriorPoint(self, Y0):
+        self._Y0 = Y0
+        return True

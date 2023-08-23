@@ -100,13 +100,10 @@ if __name__ == "__main__":
 
     utils.printInBoldBlue("finding solution with numerical solvers")
     problem.updateObjective()
-    problem.updateConstraints()
     problem.computeY()
     print(f"{len(problem.Y)=}")
 
     print(f"{problem.train_num=}; {problem.valid_num=}; {problem.test_num=}")
-
-    problem = problem
 
     # All problem tensor
     dataset = TensorDataset(problem.X, problem.Y)
@@ -131,7 +128,7 @@ if __name__ == "__main__":
 
     utils.printInBoldBlue("finding interior points with cvxpylayers")
     # xv can arbitrary
-    Y = layer(problem.Xo.squeeze(-1), problem.Xc.squeeze(-1))  # 3D
+    Y = layer(problem.Xo.squeeze(-1), problem.Xc.squeeze(-1))  # Y is 3D
     problem.updateInteriorPoint(layer.z0)  # 3D
     print(f"{problem.Y0 = }")
     print(f"{layer.isFeasible(problem.Y0, 1e-4)}")
