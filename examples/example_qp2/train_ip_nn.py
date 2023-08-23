@@ -50,8 +50,6 @@ np.random.seed(seed)
 print(f"{torch.get_num_threads() = }")
 print(f"{torch.get_num_interop_threads() = }")
 
-criterion = nn.MSELoss()
-
 
 def main():
     utils.printInBoldBlue("CBF-QP Problem: Interior Point Network")
@@ -63,15 +61,15 @@ def main():
         "nsamples": 12869,
         "epochs": 200,
         "batch_size": 256,
-        "lr": 1e-5,
-        "hidden_size": 512,
+        "lr": 5e-6,
+        "hidden_size": 128,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
-        "estop_patience": 100,
+        "estop_patience": 5,
         "estop_delta": 0.01,  # improving rate of loss
         "seed": seed,
         "device": DEVICE,
-        "board": False,
+        "board": True,
     }
     print(args)
 
@@ -94,7 +92,7 @@ def main():
     data._device = args["device"]
     dir_dict = {}
 
-    TRAIN = 1
+    TRAIN = 0
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -217,10 +215,8 @@ def train_net(data, args, dir_dict=None):
             start_time = time.time()
             optimizer.zero_grad(set_to_none=True)
             Yhat_train = ip_net(Xtrain)
-            # train_loss = total_loss(data, Xtrain, Ytrain, Yhat_train, args)
-            # train_loss.sum().mean().backward()
-            train_loss = criterion(Yhat_train, Ytrain)
-            train_loss.backward()
+            train_loss = total_loss(data, Xtrain, Ytrain, Yhat_train, args)
+            train_loss.sum().backward()
             optimizer.step()
             train_time = time.time() - start_time
             # print(f"{train_time = }")
@@ -232,9 +228,9 @@ def train_net(data, args, dir_dict=None):
         utils.printInBoldBlue(
             "Epoch {}: train loss {:.4f}, valid loss {:.4f}, test loss {:.4f}".format(
                 epoch,
-                (epoch_stats["train_loss"]),
-                (epoch_stats["valid_loss"]),
-                (epoch_stats["test_loss"]),
+                np.mean(epoch_stats["train_loss"]),
+                np.mean(epoch_stats["valid_loss"]),
+                np.mean(epoch_stats["test_loss"]),
             )
         )
 
@@ -243,9 +239,9 @@ def train_net(data, args, dir_dict=None):
             writer.add_scalars(
                 "loss",
                 {
-                    "train": (epoch_stats["train_loss"]),
-                    "valid": (epoch_stats["valid_loss"]),
-                    "test": (epoch_stats["test_loss"]),
+                    "train": np.mean(epoch_stats["train_loss"]),
+                    "valid": np.mean(epoch_stats["valid_loss"]),
+                    "test": np.mean(epoch_stats["test_loss"]),
                 },
                 epoch,
             )
@@ -265,14 +261,16 @@ def train_net(data, args, dir_dict=None):
             stats = epoch_stats
 
         # Early stop if not improving
-        earlyStopper((epoch_stats["valid_loss"]), ip_net, stats, dir_dict["save_dir"])
+        earlyStopper(
+            np.mean(epoch_stats["valid_loss"]), ip_net, stats, dir_dict["save_dir"]
+        )
         if earlyStopper.early_stop:
             utils.printInBoldRed("\nEarlyStopping: stop training!")
             utils.printInBoldGreen(
                 "train loss {:.4f}, valid loss {:.4f}, test loss {:.4f}".format(
-                    (epoch_stats["train_loss"]),
-                    (epoch_stats["valid_loss"]),
-                    (epoch_stats["test_loss"]),
+                    np.mean(epoch_stats["train_loss"]),
+                    np.mean(epoch_stats["valid_loss"]),
+                    np.mean(epoch_stats["test_loss"]),
                 )
             )
             break
@@ -296,8 +294,7 @@ def dict_agg(stats, key, value, op="concat"):
         if op == "sum":
             stats[key] += value
         elif op == "concat":
-            # stats[key] = np.concatenate((stats[key], value), axis=0)
-            np.append(stats[key], value)
+            stats[key] = np.concatenate((stats[key], value), axis=0)
         else:
             raise NotImplementedError
     else:
@@ -314,7 +311,7 @@ def eval_net(data, X, Y, net, args, prefix, stats):
     dict_agg(
         stats,
         make_prefix("loss"),
-        criterion(Yhat, Y).detach().cpu().numpy(),
+        total_loss(data, X, Y, Yhat, args).detach().cpu().numpy(),
     )
     return stats
 
@@ -387,17 +384,13 @@ class IpNet(nn.Module):
             # nn.BatchNorm1d(layer_sizes[0]),
             nn.Linear(layer_sizes[0], layer_sizes[1]),
             nn.ReLU(),
-            nn.Dropout(p=0.4),
             # nn.BatchNorm1d(layer_sizes[1]),
             nn.Linear(layer_sizes[1], layer_sizes[2]),
-            nn.ReLU(),
-            nn.Dropout(p=0.4),
-            # nn.BatchNorm1d(layer_sizes[2]),
-            # nn.Linear(layer_sizes[1], layer_sizes[2]),
             # nn.ReLU(),
-            # nn.Dropout(p=0.4),
             # nn.BatchNorm1d(layer_sizes[2]),
+            nn.ReLU(),
             nn.Linear(layer_sizes[2], 1),
+            nn.Dropout(p=0.1),
         ]
 
         for layer in layers:

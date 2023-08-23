@@ -19,7 +19,7 @@ from . import constraints_torch
 class ConstraintModule(torch.nn.Module):
     """Description:
     Args:
-     xv_dim: dimension of step input sample
+     xo_dim: dimension of objective input sample
      xc_dim: dimension of constraint input sample
      y_dim: dimension of output, ambient space
      method: method to use
@@ -27,7 +27,7 @@ class ConstraintModule(torch.nn.Module):
 
     def __init__(
         self,
-        xv_dim=None,
+        xo_dim=None,
         xc_dim=None,
         y_dim=None,
         method="RAYEN",
@@ -38,12 +38,13 @@ class ConstraintModule(torch.nn.Module):
         super().__init__()
 
         self.method = method
-        self.m = xv_dim  # Dimension of the step input vector xv
+        self.m = xo_dim  # Dimension of the objective input vector xo
         self.d = xc_dim  # Dimension of the constraint input vector xc
         self.k = y_dim  # Dimension of the ambient space (output)
         self.n = None  # Dimension of the embedded space (determined later)
         self.batch_size = None
         self.cstrInputMap = cstrInputMap
+        self.net = net
 
         self.cs = constraints_torch.ConvexConstraints(num_cstr)
         self.params_indexes = {"qc": None, "soc": None, "lmi": None}
@@ -76,7 +77,6 @@ class ConstraintModule(torch.nn.Module):
 
         if create_step_input_map:
             self.stepInputMap = nn.Linear(self.m, self.n)
-            nn.init.kaiming_normal_(self.stepInputMap.weight)
         else:
             self.stepInputMap = nn.Sequential()
 
@@ -511,16 +511,6 @@ class ConstraintModule(torch.nn.Module):
 
     # Forward pass for RAYEN
     def forwardForRAYEN(self, v):
-        # Update Ap, bp, NA_E
-        self.updateSubspaceConstraints()  # torch!!
-
-        # Solve interior point
-        self.z0 = self.solveInteriorPoint()
-        # print(f"z0 = {self.z0}")
-
-        # # Update and register all necessary parameters
-        self.updateForwardParams()
-
         v_bar = torch.nn.functional.normalize(v, dim=1)
         kappa = self.computeKappa(v_bar)
         norm_v = torch.linalg.vector_norm(v, dim=(1, 2), keepdim=True)
@@ -529,20 +519,13 @@ class ConstraintModule(torch.nn.Module):
         # print(f"alpha = {alpha}")
         return self.getyFromz(self.z0 + alpha * v_bar)
 
-    def forward(self, xv, xc):
+    def forward(self, x):
         ##################  MAPPER LAYER ####################
-        # nn.Module forward method only accepts a single input tensor
         # nsib denotes the number of samples in the batch
-        # each sample includes xv (nsamples, m) and xc (nsamples, d)
-        self.batch_size = xv.shape[0]
-        # utils.verify(x.shape[1] == self.m + self.d, "wrong input dimension")
-        # xv = x[:, 0 : self.m, 0:1]  # After this, xv has dim [nsib, m, 1]
-        # xc = x[:, self.m : self.m + self.d, 0:1]  # After this, xv has dim [nsib, d, 1]
-
-        # TODO Refactor this into sth cleaner
-        v = self.stepInputMap(xv)  # shape = (nsamples, m)
-        v = torch.unsqueeze(v, dim=2)  # shape = (nsamples, m, 1)
-        xc = torch.unsqueeze(xc, dim=2)  # shape = (nsamples, d, 1)
+        # each sample includes xo (nsamples, m, 1) and xc (nsamples, d, 1)
+        self.batch_size = x.shape[0]
+        xo = x[:, 0 : self.m, 0:1]
+        xc = x[:, self.m : self.m + self.d, 0:1]
 
         # FIXME
         # Option 1: Define CustomDataset just like before
@@ -563,8 +546,25 @@ class ConstraintModule(torch.nn.Module):
             self.cs.lmis.F,
         ) = torch.vmap(self.cstrInputMap)(xc)
         ####################################################
+        # Update Ap, bp, NA_E
+        self.updateSubspaceConstraints()  # torch!!
 
-        y = self.forwardForMethod(v)
+        # Solve interior point
+        self.z0 = self.solveInteriorPoint()
+        # print(f"z0 = {self.z0}")
+
+        # Update and register all necessary parameters
+        self.updateForwardParams()
+
+        # NN for v step
+        input = torch.cat((x, self.z0), 1).squeeze(-1)
+        xv = self.net(input)
+
+        # Compute feasible step
+        # TODO Refactor this into sth cleaner
+        v = self.stepInputMap(xv)  # shape = (nsamples, m)
+        v = torch.unsqueeze(v, dim=2)  # shape = (nsamples, m, 1)
+        y = self.forwardForMethod(v)  # shape = (nsamples, k, 1)
 
         return y
 

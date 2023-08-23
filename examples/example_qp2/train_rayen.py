@@ -29,7 +29,7 @@ from os.path import normpath, dirname, join
 
 sys.path.insert(0, normpath(join(dirname(__file__), "../..")))
 
-from rayen import constraints, constraint_module, utils
+from rayen import constraints, constraint_module2, utils
 from examples.early_stopping import EarlyStopping
 
 # pickle is lazy and does not serialize class definitions or function
@@ -37,8 +37,8 @@ from examples.early_stopping import EarlyStopping
 # (the module it lives in and its name)
 from CbfQpProblem import CbfQpProblem
 
-DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-# DEVICE = torch.device("cpu")
+# DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+DEVICE = torch.device("cpu")
 torch.set_default_device(DEVICE)
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
@@ -50,35 +50,40 @@ np.random.seed(seed)
 print(f"{torch.get_num_threads() = }")
 print(f"{torch.get_num_interop_threads() = }")
 
-criterion = nn.MSELoss()
-
 
 def main():
-    utils.printInBoldBlue("CBF-QP Problem: Interior Point Network")
+    utils.printInBoldBlue("CBF-QP Problem")
     print(f"{DEVICE = }")
     # Define problem
     args = {
-        "xo": 1,
-        "xc": 2,
-        "nsamples": 12869,
-        "epochs": 200,
-        "batch_size": 256,
-        "lr": 1e-5,
-        "hidden_size": 512,
+        "prob_type": "cbf_qp",
+        "xo": 10,
+        "xc": 4,
+        "nsamples": 9591,
+        "method": "RAYEN",
+        "loss_type": "unsupervised",
+        "epochs": 100,
+        "batch_size": 64,
+        "lr": 5e-3,
+        "hidden_size": 32,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
-        "estop_patience": 100,
-        "estop_delta": 0.01,  # improving rate of loss
+        "estop_patience": 5,
+        "estop_delta": 0,  # improving rate of loss
         "seed": seed,
         "device": DEVICE,
-        "board": False,
+        "board": True,
     }
     print(args)
 
     # Load data, and put on GPU if needed
-    filepath = "data/cbf_qp_dataset2_xo{}_xc{}_ex{}".format(
-        args["xo"], args["xc"], args["nsamples"]
-    )
+    prob_type = args["prob_type"]
+    if prob_type == "cbf_qp":
+        filepath = "data/cbf_qp_dataset2_xo{}_xc{}_ex{}".format(
+            args["xo"], args["xc"], args["nsamples"]
+        )
+    else:
+        raise NotImplementedError
 
     with open(filepath, "rb") as f:
         data = pickle.load(f)
@@ -94,45 +99,63 @@ def main():
     data._device = args["device"]
     dir_dict = {}
 
+    # MODEL
+    nn_layer = nn.Sequential(
+        nn.Linear(args["xo"] + args["xc"] + args["xo"], args["hidden_size"]),
+        nn.BatchNorm1d(args["hidden_size"]),
+        nn.ReLU(),
+        nn.Linear(args["hidden_size"], args["hidden_size"]),
+        nn.BatchNorm1d(args["hidden_size"]),
+        nn.ReLU(),
+        nn.Linear(args["hidden_size"], args["xo"]),
+    )
+
+    cbf_qp_net = constraint_module2.ConstraintModule(
+        args["xo"],
+        args["xc"],
+        args["xo"],
+        args["method"],
+        data.num_cstr,
+        data.cstrInputMap,
+        nn_layer,
+    )
+
     TRAIN = 1
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
         dir_dict["now"] = datetime.now().strftime("%b%d_%H-%M-%S")
-        dir_dict["save_dir"] = os.path.join(
-            "results", "ipnn", str(data), dir_dict["now"]
-        )
-        dir_dict["tb_dir"] = os.path.join(
-            "runs", "ipnn", dir_dict["now"] + "_" + str(data)
-        )
+        dir_dict["save_dir"] = os.path.join("results", str(data), dir_dict["now"])
+        dir_dict["tb_dir"] = os.path.join("runs", dir_dict["now"] + "_" + str(data))
         if not os.path.exists(dir_dict["save_dir"]):
             os.makedirs(dir_dict["save_dir"])
         with open(os.path.join(dir_dict["save_dir"], "args.dict"), "wb") as f:
             pickle.dump(args, f)
 
-        train_net(data, args, dir_dict)
+        train_net(cbf_qp_net, data, args, dir_dict)
         print(f"{dir_dict['save_dir'] = }")
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", "ipnn", str(data), "Aug21_23-02-08", "model.dict"
+            "results", str(data), "Aug22_20-53-33", "model.dict"
         )
-        infer_net(data, args, dir_dict)
+        infer_net(cbf_qp_net, data, args, dir_dict)
     print(args)
 
 
-def train_net(data, args, dir_dict=None):
+def train_net(cbf_qp_net, data, args, dir_dict=None):
     board = args["board"]
     if board:
         os.system("pkill -f tensorboard")
         # Set up TensorBoard
         writer = SummaryWriter(dir_dict["tb_dir"], flush_secs=1)
         # Find the latest run directory
-        latest_run = os.listdir("runs/ipnn")[-1]
+        latest_run = os.listdir("runs")[-1]
         # Start TensorBoard for the latest run
         subprocess.Popen(
             [
-                f"python3 -m tensorboard.main --logdir={os.path.join('runs','ipnn')} --bind_all",
+                f"python3 -m tensorboard.main --logdir={os.path.join('runs')} --bind_all",
+                # f"python3 -m tensorboard.main --logdir={os.path.join('runs', latest_run)} --bind_all",
             ],
             shell=True,
         )
@@ -143,7 +166,7 @@ def train_net(data, args, dir_dict=None):
     batch_size = args["batch_size"]
 
     # All data tensor
-    dataset = TensorDataset(data.Xc, data.Y0)
+    dataset = TensorDataset(data.X, data.Y, data.obj_val, data.Y0)
 
     # Option 1
     # train_dataset, valid_dataset, test_dataset = torch.utils.data.random_split(
@@ -164,6 +187,13 @@ def train_net(data, args, dir_dict=None):
     )
     print(f"{len(train_dataset) = }; {len(valid_dataset) = }; {len(test_dataset) = }")
 
+    # Compute ground truth averaged objective/loss
+    train_truth_obj = compute_truth_obj(train_dataset)
+    valid_truth_obj = compute_truth_obj(valid_dataset)
+    test_truth_obj = compute_truth_obj(test_dataset)
+
+    print(f"{train_truth_obj = }; {valid_truth_obj = }; {test_truth_obj = }")
+
     # To data batch
     train_loader = DataLoader(
         train_dataset,
@@ -175,10 +205,9 @@ def train_net(data, args, dir_dict=None):
     test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
 
     # Network
-    ip_net = IpNet(data, args)
-    ip_net.to(args["device"])
-    optimizer = optim.Adam(ip_net.parameters(), lr=solver_step)
-    total_params = sum(p.numel() for p in ip_net.parameters())
+    cbf_qp_net.to(args["device"])
+    optimizer = optim.Adam(cbf_qp_net.parameters(), lr=solver_step)
+    total_params = sum(p.numel() for p in cbf_qp_net.parameters())
     print(f"Number of parameters: {total_params}")
 
     earlyStopper = EarlyStopping(
@@ -194,33 +223,37 @@ def train_net(data, args, dir_dict=None):
 
         with torch.no_grad():
             # Get valid loss
-            ip_net.eval()
+            cbf_qp_net.eval()
             for valid_batch in valid_loader:
                 Xvalid = valid_batch[0].to(args["device"])
                 Yvalid = valid_batch[1].to(args["device"])
-                eval_net(data, Xvalid, Yvalid, ip_net, args, "valid", epoch_stats)
+                Y0valid = valid_batch[3].to(args["device"])
+                cbf_qp_net.z0 = Y0valid
+                eval_net(data, Xvalid, Yvalid, cbf_qp_net, args, "valid", epoch_stats)
 
             # Get test loss
-            ip_net.eval()
+            cbf_qp_net.eval()
             for test_batch in test_loader:
                 Xtest = test_batch[0].to(args["device"])
                 Ytest = test_batch[1].to(args["device"])
-                eval_net(data, Xtest, Ytest, ip_net, args, "test", epoch_stats)
+                Y0test = test_batch[3].to(args["device"])
+                cbf_qp_net.z0 = Y0test
+                eval_net(data, Xtest, Ytest, cbf_qp_net, args, "test", epoch_stats)
 
         # Get train loss
-        ip_net.train()
+        cbf_qp_net.train()
 
         # for train_batch in tqdm(train_loader):
         for train_batch in train_loader:
             Xtrain = train_batch[0].to(args["device"])
-            Ytrain = train_batch[1].to(args["device"]).squeeze(-1)
+            Ytrain = train_batch[1].to(args["device"]).unsqueeze(-1)
             start_time = time.time()
             optimizer.zero_grad(set_to_none=True)
-            Yhat_train = ip_net(Xtrain)
-            # train_loss = total_loss(data, Xtrain, Ytrain, Yhat_train, args)
-            # train_loss.sum().mean().backward()
-            train_loss = criterion(Yhat_train, Ytrain)
-            train_loss.backward()
+            Y0train = train_batch[3].to(args["device"])
+            cbf_qp_net.z0 = Y0train
+            Yhat_train = cbf_qp_net(Xtrain)
+            train_loss = total_loss(data, Xtrain, Ytrain, Yhat_train, args)
+            train_loss.sum().backward()
             optimizer.step()
             train_time = time.time() - start_time
             # print(f"{train_time = }")
@@ -230,11 +263,14 @@ def train_net(data, args, dir_dict=None):
         # print(f"{epoch_time = }")
 
         utils.printInBoldBlue(
-            "Epoch {}: train loss {:.4f}, valid loss {:.4f}, test loss {:.4f}".format(
+            "Epoch {}: train loss {:.4f}/{:.4f}, valid loss {:.4f}/{:.4f}, test loss {:.4f}/{:.4f}".format(
                 epoch,
-                (epoch_stats["train_loss"]),
-                (epoch_stats["valid_loss"]),
-                (epoch_stats["test_loss"]),
+                np.mean(epoch_stats["train_loss"]),
+                train_truth_obj,
+                np.mean(epoch_stats["valid_loss"]),
+                valid_truth_obj,
+                np.mean(epoch_stats["test_loss"]),
+                test_truth_obj,
             )
         )
 
@@ -243,51 +279,74 @@ def train_net(data, args, dir_dict=None):
             writer.add_scalars(
                 "loss",
                 {
-                    "train": (epoch_stats["train_loss"]),
-                    "valid": (epoch_stats["valid_loss"]),
-                    "test": (epoch_stats["test_loss"]),
+                    "train": np.mean(epoch_stats["train_loss"]),
+                    "valid": np.mean(epoch_stats["valid_loss"]),
+                    "test": np.mean(epoch_stats["test_loss"]),
                 },
                 epoch,
             )
             writer.flush()
 
-        # Log all statistics
-        if args["save_all_stats"]:
-            if epoch == 0:
-                for key in epoch_stats.keys():
-                    stats[key] = np.expand_dims(np.array(epoch_stats[key]), axis=0)
-            else:
-                for key in epoch_stats.keys():
-                    stats[key] = np.concatenate(
-                        (stats[key], np.expand_dims(np.array(epoch_stats[key]), axis=0))
-                    )
-        else:
-            stats = epoch_stats
-
         # Early stop if not improving
-        earlyStopper((epoch_stats["valid_loss"]), ip_net, stats, dir_dict["save_dir"])
+        earlyStopper(
+            np.mean(epoch_stats["valid_loss"]), cbf_qp_net, stats, dir_dict["save_dir"]
+        )
+
+        # Log all statistics
+        if not earlyStopper.counting_stop:
+            if args["save_all_stats"]:
+                if epoch == 0:
+                    for key in epoch_stats.keys():
+                        stats[key] = np.expand_dims(np.array(epoch_stats[key]), axis=0)
+                else:
+                    for key in epoch_stats.keys():
+                        stats[key] = np.concatenate(
+                            (
+                                stats[key],
+                                np.expand_dims(np.array(epoch_stats[key]), axis=0),
+                            )
+                        )
+            else:
+                stats = epoch_stats
+
         if earlyStopper.early_stop:
             utils.printInBoldRed("\nEarlyStopping: stop training!")
+            with open(os.path.join(dir_dict["save_dir"], "stats.dict"), "rb") as f:
+                final_data = pickle.load(f)
             utils.printInBoldGreen(
-                "train loss {:.4f}, valid loss {:.4f}, test loss {:.4f}".format(
-                    (epoch_stats["train_loss"]),
-                    (epoch_stats["valid_loss"]),
-                    (epoch_stats["test_loss"]),
+                "normalized train loss {:.4f}, valid loss {:.4f}, test loss {:.4f}".format(
+                    train_truth_obj / np.mean(final_data["train_loss"][-1]),
+                    valid_truth_obj / np.mean(final_data["valid_loss"][-1]),
+                    test_truth_obj / np.mean(final_data["test_loss"][-1]),
                 )
             )
             break
 
     if board:
         writer.close()
-    return ip_net, stats
+    return cbf_qp_net, stats
 
 
 def total_loss(data, X, Y, Yhat, args):
-    """Compute loss for batch X in supervised manner
-    Don't use average here, only for evaluating
+    """Compute loss for batch X in supervised or unsupervised manner
     Output: obj_cost (nsamples, 1)"""
-    obj_cost = torch.square(Y - Yhat)
+
+    if args["loss_type"] == "supervised":
+        obj_cost = torch.square(Y - Yhat)
+    else:
+        Xo = data.getXo(X)
+        data.updateObjective(Xo)
+        obj_cost = data.objectiveFunction(Yhat)
     return obj_cost
+
+
+def compute_truth_obj(dataset):
+    """Compute the truth objective value/loss from the dataset"""
+    sum = 0.0
+    for i in range(len(dataset)):
+        obj_val = dataset[i][2]
+        sum += obj_val
+    return sum / len(dataset)
 
 
 # Modifies stats in place
@@ -296,8 +355,7 @@ def dict_agg(stats, key, value, op="concat"):
         if op == "sum":
             stats[key] += value
         elif op == "concat":
-            # stats[key] = np.concatenate((stats[key], value), axis=0)
-            np.append(stats[key], value)
+            stats[key] = np.concatenate((stats[key], value), axis=0)
         else:
             raise NotImplementedError
     else:
@@ -314,16 +372,16 @@ def eval_net(data, X, Y, net, args, prefix, stats):
     dict_agg(
         stats,
         make_prefix("loss"),
-        criterion(Yhat, Y).detach().cpu().numpy(),
+        total_loss(data, X, Y, Yhat, args).detach().cpu().numpy(),
     )
     return stats
 
 
 @torch.no_grad()
-def infer_net(data, args, dir_dict=None):
+def infer_net(model, data, args, dir_dict=None):
     "Intuitvely evaluate random test data by inference"
 
-    dataset = TensorDataset(data.Xc, data.Y0)
+    dataset = TensorDataset(data.X, data.Y, data.obj_val)
     test_dataset = torch.utils.data.Subset(
         dataset,
         range(
@@ -331,84 +389,28 @@ def infer_net(data, args, dir_dict=None):
             data.train_num + data.valid_num + data.test_num,
         ),
     )
-    model = IpNet(data, args)
+
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
-
-    # Warm up the GPU
-    X_dummy = torch.Tensor(500, data.xc_dim, 1).uniform_(-0.5, 0.5)
-    _ = model(X_dummy.to(args["device"]))
 
     total_time = 0.0
 
     num = len(test_dataset)
-    for i in range(50):
+    for i in range(128):
         idx = np.random.randint(0, num)
-        X, Y0 = test_dataset[idx]
+        X, Y, obj_val = test_dataset[idx]
         X = X.unsqueeze(0)
         start_time = time.time()
-        Ynn = model(X).item()
+        Ynn = model(X).squeeze().numpy()
         total_time += time.time() - start_time
-        Xo = X[0][0].item()
-        # print(f"{Xo   = :.4f}")
-        Y0 = Y0.item()
-        utils.printInBoldGreen(f"{Y0 = :.4f}\n{Ynn  = :.4f}")
+        Xo = X.squeeze().numpy()
+        print(f"{Xo   = }")
+        Yopt = Y.numpy()
+        utils.printInBoldGreen(f"{Yopt = }\n{Ynn  = }")
         print("--")
 
-    infer_time = total_time / 50
+    infer_time = total_time / 128
     print(f"{infer_time=}")
-
-
-###################################################################
-# MODEL
-###################################################################
-class IpNet(nn.Module):
-    def __init__(self, data, args):
-        super().__init__()
-        self._data = data
-        self._args = args
-
-        # number of hidden layers and its size
-        layer_sizes = [
-            self._data.xc_dim,
-            self._args["hidden_size"],
-            self._args["hidden_size"],
-        ]
-        # layers = reduce(
-        #     operator.add,
-        #     [
-        #         # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
-        #         [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
-        #         for a, b in zip(layer_sizes[0:-1], layer_sizes[1:])
-        #     ],
-        # )
-
-        layers = [
-            # nn.BatchNorm1d(layer_sizes[0]),
-            nn.Linear(layer_sizes[0], layer_sizes[1]),
-            nn.ReLU(),
-            nn.Dropout(p=0.4),
-            # nn.BatchNorm1d(layer_sizes[1]),
-            nn.Linear(layer_sizes[1], layer_sizes[2]),
-            nn.ReLU(),
-            nn.Dropout(p=0.4),
-            # nn.BatchNorm1d(layer_sizes[2]),
-            # nn.Linear(layer_sizes[1], layer_sizes[2]),
-            # nn.ReLU(),
-            # nn.Dropout(p=0.4),
-            # nn.BatchNorm1d(layer_sizes[2]),
-            nn.Linear(layer_sizes[2], 1),
-        ]
-
-        for layer in layers:
-            if type(layer) == nn.Linear:
-                nn.init.kaiming_normal_(layer.weight)
-
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, x):
-        # x is 3D
-        return self.net(x.squeeze(-1))
 
 
 if __name__ == "__main__":

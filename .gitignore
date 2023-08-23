@@ -170,6 +170,14 @@ examples/example_qp/data/
 examples/example_qp/results/
 examples/example_qp/runs/
 
+examples/example_qp2/data/
+examples/example_qp2/results/
+examples/example_qp2/runs/
+
 examples/example_qcqp/data/
 examples/example_qcqp/results/
 examples/example_qcqp/runs/
+
+examples/example_qcqp2/data/
+examples/example_qcqp2/results/
+examples/example_qcqp2/runs/
