@@ -423,9 +423,12 @@ class ConstraintModule(torch.nn.Module):
                 kappa_positive_i = self.all_phi[:, i, :] @ rho + torch.sqrt(
                     rhoT @ self.all_delta[:, idx, :] @ rho
                 )
+                # print(kappa_positive_i.shape)
                 assert torch.all(
                     kappa_positive_i >= 0
-                ), f"Smallest element is {kappa_positive_i}"  # If not, then Z may not be feasible (note that z0 is in the interior of Z)
+                ), f"Smallest element is {kappa_positive_i}"
+                # If not, then Z may not be feasible (note that z0 is in the interior of Z)
+
                 all_kappas_positives = torch.cat(
                     (all_kappas_positives, kappa_positive_i), dim=1
                 )

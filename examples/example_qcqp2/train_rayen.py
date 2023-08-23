@@ -35,7 +35,7 @@ from examples.early_stopping import EarlyStopping
 # pickle is lazy and does not serialize class definitions or function
 # definitions. Instead it saves a reference of how to find the class
 # (the module it lives in and its name)
-from CbfQpProblem import CbfQpProblem
+from CbfQcqpProblem import CbfQcqpProblem
 
 # DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 DEVICE = torch.device("cpu")
@@ -52,20 +52,20 @@ print(f"{torch.get_num_interop_threads() = }")
 
 
 def main():
-    utils.printInBoldBlue("CBF-QP Problem")
+    utils.printInBoldBlue("CBF-QCQP Problem")
     print(f"{DEVICE = }")
     # Define problem
     args = {
-        "prob_type": "cbf_qp",
-        "xo": 6,
-        "xc": 12,
-        "nsamples": 52326,
+        "prob_type": "cbf_qcqp",
+        "xo": 3,
+        "xc": 6,
+        "nsamples": 11990,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 200,
-        "batch_size": 128,
+        "batch_size": 64,
         "lr": 5e-3,
-        "hidden_size": 256,
+        "hidden_size": 64,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
         "estop_patience": 20,
@@ -78,8 +78,8 @@ def main():
 
     # Load data, and put on GPU if needed
     prob_type = args["prob_type"]
-    if prob_type == "cbf_qp":
-        filepath = "data/cbf_qp_dataset2_xo{}_xc{}_ex{}".format(
+    if prob_type == "cbf_qcqp":
+        filepath = "data/cbf_qcqp_dataset_xo{}_xc{}_ex{}".format(
             args["xo"], args["xc"], args["nsamples"]
         )
     else:
@@ -107,10 +107,13 @@ def main():
         nn.Linear(args["hidden_size"], args["hidden_size"]),
         nn.BatchNorm1d(args["hidden_size"]),
         nn.ReLU(),
+        nn.Linear(args["hidden_size"], args["hidden_size"]),
+        # nn.BatchNorm1d(args["hidden_size"]),
+        nn.ReLU(),
         nn.Linear(args["hidden_size"], args["xo"]),
     )
 
-    cbf_qp_net = constraint_module2.ConstraintModule(
+    cbf_qcqp_net = constraint_module2.ConstraintModule(
         args["xo"],
         args["xc"],
         args["xo"],
@@ -132,18 +135,18 @@ def main():
         with open(os.path.join(dir_dict["save_dir"], "args.dict"), "wb") as f:
             pickle.dump(args, f)
 
-        train_net(cbf_qp_net, data, args, dir_dict)
+        train_net(cbf_qcqp_net, data, args, dir_dict)
         print(f"{dir_dict['save_dir'] = }")
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug22_20-53-33", "model.dict"
+            "results", str(data), "Aug23_11-29-31", "model.dict"
         )
-        infer_net(cbf_qp_net, data, args, dir_dict)
+        infer_net(cbf_qcqp_net, data, args, dir_dict)
     print(args)
 
 
-def train_net(cbf_qp_net, data, args, dir_dict=None):
+def train_net(cbf_qcqp_net, data, args, dir_dict=None):
     board = args["board"]
     if board:
         os.system("pkill -f tensorboard")
@@ -205,9 +208,9 @@ def train_net(cbf_qp_net, data, args, dir_dict=None):
     test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
 
     # Network
-    cbf_qp_net.to(args["device"])
-    optimizer = optim.Adam(cbf_qp_net.parameters(), lr=solver_step)
-    total_params = sum(p.numel() for p in cbf_qp_net.parameters())
+    cbf_qcqp_net.to(args["device"])
+    optimizer = optim.Adam(cbf_qcqp_net.parameters(), lr=solver_step)
+    total_params = sum(p.numel() for p in cbf_qcqp_net.parameters())
     print(f"Number of parameters: {total_params}")
 
     earlyStopper = EarlyStopping(
@@ -223,25 +226,25 @@ def train_net(cbf_qp_net, data, args, dir_dict=None):
 
         with torch.no_grad():
             # Get valid loss
-            cbf_qp_net.eval()
+            cbf_qcqp_net.eval()
             for valid_batch in valid_loader:
                 Xvalid = valid_batch[0].to(args["device"])
                 Yvalid = valid_batch[1].to(args["device"])
                 Y0valid = valid_batch[3].to(args["device"])
-                cbf_qp_net.z0 = Y0valid
-                eval_net(data, Xvalid, Yvalid, cbf_qp_net, args, "valid", epoch_stats)
+                cbf_qcqp_net.z0 = Y0valid
+                eval_net(data, Xvalid, Yvalid, cbf_qcqp_net, args, "valid", epoch_stats)
 
             # Get test loss
-            cbf_qp_net.eval()
+            cbf_qcqp_net.eval()
             for test_batch in test_loader:
                 Xtest = test_batch[0].to(args["device"])
                 Ytest = test_batch[1].to(args["device"])
                 Y0test = test_batch[3].to(args["device"])
-                cbf_qp_net.z0 = Y0test
-                eval_net(data, Xtest, Ytest, cbf_qp_net, args, "test", epoch_stats)
+                cbf_qcqp_net.z0 = Y0test
+                eval_net(data, Xtest, Ytest, cbf_qcqp_net, args, "test", epoch_stats)
 
         # Get train loss
-        cbf_qp_net.train()
+        cbf_qcqp_net.train()
 
         # for train_batch in tqdm(train_loader):
         for train_batch in train_loader:
@@ -250,8 +253,8 @@ def train_net(cbf_qp_net, data, args, dir_dict=None):
             start_time = time.time()
             optimizer.zero_grad(set_to_none=True)
             Y0train = train_batch[3].to(args["device"])
-            cbf_qp_net.z0 = Y0train
-            Yhat_train = cbf_qp_net(Xtrain)
+            cbf_qcqp_net.z0 = Y0train
+            Yhat_train = cbf_qcqp_net(Xtrain)
             train_loss = total_loss(data, Xtrain, Ytrain, Yhat_train, args)
             train_loss.sum().backward()
             optimizer.step()
@@ -289,7 +292,10 @@ def train_net(cbf_qp_net, data, args, dir_dict=None):
 
         # Early stop if not improving
         earlyStopper(
-            np.mean(epoch_stats["valid_loss"]), cbf_qp_net, stats, dir_dict["save_dir"]
+            np.mean(epoch_stats["valid_loss"]),
+            cbf_qcqp_net,
+            stats,
+            dir_dict["save_dir"],
         )
 
         # Log all statistics
@@ -324,7 +330,7 @@ def train_net(cbf_qp_net, data, args, dir_dict=None):
 
     if board:
         writer.close()
-    return cbf_qp_net, stats
+    return cbf_qcqp_net, stats
 
 
 def total_loss(data, X, Y, Yhat, args):
@@ -395,8 +401,9 @@ def infer_net(model, data, args, dir_dict=None):
 
     total_time = 0.0
 
-    num = len(test_dataset)
-    for i in range(128):
+    # num = len(test_dataset)
+    num = 128
+    for i in range(num):
         idx = np.random.randint(0, num)
         X, Y, obj_val = test_dataset[idx]
         X = X.unsqueeze(0)
@@ -409,7 +416,7 @@ def infer_net(model, data, args, dir_dict=None):
         utils.printInBoldGreen(f"{Yopt = }\n{Ynn  = }")
         print("--")
 
-    infer_time = total_time / 128
+    infer_time = total_time / num
     print(f"{infer_time=}")
 
 

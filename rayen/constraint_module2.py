@@ -45,6 +45,7 @@ class ConstraintModule(torch.nn.Module):
         self.batch_size = None
         self.cstrInputMap = cstrInputMap
         self.net = net
+        self.z0 = None
 
         self.cs = constraints_torch.ConvexConstraints(num_cstr)
         self.params_indexes = {"qc": None, "soc": None, "lmi": None}
@@ -550,7 +551,9 @@ class ConstraintModule(torch.nn.Module):
         self.updateSubspaceConstraints()  # torch!!
 
         # Solve interior point
-        self.z0 = self.solveInteriorPoint()
+        # if not self.train:
+        if self.z0 is None:
+            self.z0 = self.solveInteriorPoint()
         # print(f"z0 = {self.z0}")
 
         # Update and register all necessary parameters

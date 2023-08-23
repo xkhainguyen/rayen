@@ -21,7 +21,7 @@ import utils_examples
 import fixpath  # Following this example: https://github.com/tartley/colorama/blob/master/demos/demo01.py
 from rayen import constraints, constraint_module, utils
 
-methods = ["RAYEN_old", "RAYEN", "Bar", "UU", "PP", "UP", "DC3"]
+methods = ["RAYEN"]
 index_examples_to_run = list(range(15))
 ###############
 

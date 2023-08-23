@@ -39,11 +39,11 @@ class CbfQcqpProblem(QcqpProblem):
     def getBoundConstraint(self, xc):
         # All 2D tensor
         dim = self.y_dim
-        P = 2 * torch.eye(dim, dim)
-        P_sqrt = 0.5 * P
+        P = torch.eye(dim, dim)
+        P_sqrt = P
         q = torch.zeros(dim, 1)
         u_limit = 1.0  # CHANGE
-        r = -torch.tensor([[u_limit**2]])
+        r = -torch.tensor([[u_limit**2 / 2]])
         return P, P_sqrt, q, r
 
     def getCbfConstraint(self, xc):

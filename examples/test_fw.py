@@ -26,8 +26,7 @@ from rayen import constraints, constraint_module, utils
 np.set_printoptions(precision=2)
 
 # Set the default device to GPU if available, otherwise use CPU
-device = "cuda" if torch.cuda.is_available() else "cpu"
-# device = "cpu"
+device = "cpu"
 torch.set_default_tensor_type(
     torch.cuda.FloatTensor if device == "cuda" else torch.FloatTensor
 )
@@ -39,7 +38,7 @@ np.random.seed(seed)
 
 method = "RAYEN"
 
-example_number = 2
+example_number = 13
 example = RppExample(example_number)
 
 my_layer = constraint_module.ConstraintModule(
@@ -51,7 +50,7 @@ my_layer = constraint_module.ConstraintModule(
     cstrInputMap=example.cstrInputMap,
 ).to(device)
 
-fig = plt.figure()
+fig = plt.figure(figsize=(6, 6))
 fig.suptitle(method + ": " + example.name, fontsize=14)
 
 num_cstr_samples = 1
@@ -70,8 +69,8 @@ for i in range(num_cstr_samples):
     if example.xv_dim == 2:
         xv_batched = torch.cat((xv_batched_x, xv_batched_y), 1)
     # print(xv_batched)
-    xv = torch.tensor([0.0, 10.5, 1.0])
-    xv_batched = xv.unsqueeze(0).repeat(num_samples, 1)
+    # xv = torch.tensor([0.0, 10.5, 1.0])
+    # xv_batched = xv.unsqueeze(0).repeat(num_samples, 1)
 
     # Define constraint input tensor
     # xc = torch.Tensor(example.xc_dim).uniform_(1, 5)
@@ -117,4 +116,4 @@ for i in range(num_cstr_samples):
         ax.scatter(y0[0, 0, 0], y0[0, 1, 0], y0[0, 2, 0], color="r", s=100)
         ax.scatter(result[:, 0, 0], result[:, 1, 0], result[:, 2, 0])
 
-# plt.show()
+plt.show()

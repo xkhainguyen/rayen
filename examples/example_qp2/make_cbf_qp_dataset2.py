@@ -50,10 +50,10 @@ def check_balance(problem, dataset):
 if __name__ == "__main__":
     utils.printInBoldBlue("Generating dataset")
     num_samples = 50000
-    xo_dim = 12  # nominal control u_bar dimension
-    y_dim = 12  # filtered control, output of the network
-    pos_dim = 12
-    vel_dim = 12
+    xo_dim = 6  # nominal control u_bar dimension
+    y_dim = 6  # filtered control, output of the network
+    pos_dim = 6
+    vel_dim = 6
     xc_dim = pos_dim + vel_dim  # state x dimension
 
     np.random.seed(1999)
@@ -123,14 +123,14 @@ if __name__ == "__main__":
     check_balance(problem, valid_dataset)
     check_balance(problem, test_dataset)
 
-    print(train_dataset[1])
-    print(problem.obj_val)
+    # print(train_dataset[1])
+    # print(problem.obj_val)
 
     utils.printInBoldBlue("finding interior points with cvxpylayers")
     # xv can arbitrary
     Y = layer(problem.Xo.squeeze(-1), problem.Xc.squeeze(-1))  # Y is 3D
     problem.updateInteriorPoint(layer.z0)  # 3D
-    print(f"{problem.Y0 = }")
+    # print(f"{problem.Y0 = }")
     print(f"{layer.isFeasible(problem.Y0, 1e-4)}")
 
     with open(

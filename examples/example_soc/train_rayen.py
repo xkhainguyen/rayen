@@ -18,6 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
 import pickle
+from tqdm import tqdm
 import time
 from datetime import datetime
 import os
@@ -28,16 +29,17 @@ from os.path import normpath, dirname, join
 
 sys.path.insert(0, normpath(join(dirname(__file__), "../..")))
 
-from rayen import constraints, constraint_module, utils
+from rayen import constraints, constraint_module2, utils
 from examples.early_stopping import EarlyStopping
 
 # pickle is lazy and does not serialize class definitions or function
 # definitions. Instead it saves a reference of how to find the class
 # (the module it lives in and its name)
-from CbfQcqpProblem import CbfQcqpProblem
+from SocProblem import SocProblem
 
 # DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 DEVICE = torch.device("cpu")
+torch.set_default_device(DEVICE)
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
@@ -45,34 +47,39 @@ seed = 1999
 torch.manual_seed(seed)
 np.random.seed(seed)
 
+print(f"{torch.get_num_threads() = }")
+print(f"{torch.get_num_interop_threads() = }")
+
 
 def main():
-    utils.printInBoldBlue("CBF-QCQP Problem")
+    utils.printInBoldBlue("CBF-SOC Problem")
     print(f"{DEVICE = }")
     # Define problem
     args = {
-        "prob_type": "cbf_qcqp",
-        "xo": 2,
-        "xc": 4,
-        "nsamples": 11660,
+        "prob_type": "cbf_soc",
+        "xo": 3,
+        "xc": 6,
+        "nsamples": 14997,
         "method": "RAYEN",
         "loss_type": "unsupervised",
-        "epochs": 200,
+        "epochs": 100,
         "batch_size": 64,
-        "lr": 1e-5,
+        "lr": 5e-3,
         "hidden_size": 64,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
-        "estop_patience": 5,
-        "estop_delta": 0.01,  # improving rate of loss
+        "estop_patience": 10,
+        "estop_delta": 0,  # improving rate of loss
         "seed": seed,
+        "device": DEVICE,
+        "board": False,
     }
     print(args)
 
     # Load data, and put on GPU if needed
     prob_type = args["prob_type"]
-    if prob_type == "cbf_qcqp":
-        filepath = "data/cbf_qcqp_dataset_xo{}_xc{}_ex{}".format(
+    if prob_type == "cbf_soc":
+        filepath = "data/cbf_soc_dataset_xo{}_xc{}_ex{}".format(
             args["xo"], args["xc"], args["nsamples"]
         )
     else:
@@ -85,14 +92,35 @@ def main():
         var = getattr(data, attr)
         if not callable(var) and not attr.startswith("__") and torch.is_tensor(var):
             try:
-                setattr(data, attr, var.to(DEVICE))
+                setattr(data, attr, var.to(args["device"]))
             except AttributeError:
                 pass
 
-    data._device = DEVICE
+    data._device = args["device"]
     dir_dict = {}
 
-    TRAIN = 0
+    # MODEL
+    nn_layer = nn.Sequential(
+        nn.Linear(args["xo"] + args["xc"] + args["xo"], args["hidden_size"]),
+        nn.BatchNorm1d(args["hidden_size"]),
+        nn.ReLU(),
+        nn.Linear(args["hidden_size"], args["hidden_size"]),
+        nn.BatchNorm1d(args["hidden_size"]),
+        nn.ReLU(),
+        nn.Linear(args["hidden_size"], args["xo"]),
+    )
+
+    cbf_qcqp_net = constraint_module2.ConstraintModule(
+        args["xo"],
+        args["xc"],
+        args["xo"],
+        args["method"],
+        data.num_cstr,
+        data.cstrInputMap,
+        nn_layer,
+    )
+
+    TRAIN = 1
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -104,31 +132,33 @@ def main():
         with open(os.path.join(dir_dict["save_dir"], "args.dict"), "wb") as f:
             pickle.dump(args, f)
 
-        train_net(data, args, dir_dict)
+        train_net(cbf_qcqp_net, data, args, dir_dict)
         print(f"{dir_dict['save_dir'] = }")
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug22_10-08-48", "model.dict"
+            "results", str(data), "Aug23_22-31-40", "model.dict"
         )
-        infer_net(data, args, dir_dict)
+        infer_net(cbf_qcqp_net, data, args, dir_dict)
     print(args)
 
 
-def train_net(data, args, dir_dict=None):
-    os.system("pkill -f tensorboard")
-    # Set up TensorBoard
-    writer = SummaryWriter(dir_dict["tb_dir"], flush_secs=1)
-    # Find the latest run directory
-    latest_run = os.listdir("runs")[-1]
-    # Start TensorBoard for the latest run
-    subprocess.Popen(
-        [
-            f"python3 -m tensorboard.main --logdir='./runs' --bind_all",
-            # f"python3 -m tensorboard.main --logdir={os.path.join('runs', latest_run)} --bind_all",
-        ],
-        shell=True,
-    )
+def train_net(cbf_qcqp_net, data, args, dir_dict=None):
+    board = args["board"]
+    if board:
+        os.system("pkill -f tensorboard")
+        # Set up TensorBoard
+        writer = SummaryWriter(dir_dict["tb_dir"], flush_secs=1)
+        # Find the latest run directory
+        latest_run = os.listdir("runs")[-1]
+        # Start TensorBoard for the latest run
+        subprocess.Popen(
+            [
+                f"python3 -m tensorboard.main --logdir={os.path.join('runs')} --bind_all",
+                # f"python3 -m tensorboard.main --logdir={os.path.join('runs', latest_run)} --bind_all",
+            ],
+            shell=True,
+        )
 
     # Some parameters
     solver_step = args["lr"]
@@ -136,19 +166,14 @@ def train_net(data, args, dir_dict=None):
     batch_size = args["batch_size"]
 
     # All data tensor
-    dataset = TensorDataset(data.X, data.Y, data.obj_val)
+    dataset = TensorDataset(data.X, data.Y, data.obj_val, data.Y0)
 
-    ## First option
-    # train_dataset = TensorDataset(data.trainX)
-    # valid_dataset = TensorDataset(data.validX)
-    # test_dataset = TensorDataset(data.testX)
-
-    # Second option
+    # Option 1
     # train_dataset, valid_dataset, test_dataset = torch.utils.data.random_split(
     #     dataset, [data.train_num, data.valid_num, data.test_num]
     # )
 
-    ## Third option (already created with randomness). Keep the same order for infer_net
+    ## Option 2: (already created with randomness). Keep the same order for infer_net
     train_dataset = torch.utils.data.Subset(dataset, range(data.train_num))
     valid_dataset = torch.utils.data.Subset(
         dataset, range(data.train_num, data.train_num + data.valid_num)
@@ -170,13 +195,17 @@ def train_net(data, args, dir_dict=None):
     print(f"{train_truth_obj = }; {valid_truth_obj = }; {test_truth_obj = }")
 
     # To data batch
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        generator=torch.Generator(device=args["device"]),
+    )
     valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset))
     test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
 
     # Network
-    cbf_qcqp_net = CbfQcqpNet(data, args)
-    cbf_qcqp_net.to(DEVICE)
+    cbf_qcqp_net.to(args["device"])
     optimizer = optim.Adam(cbf_qcqp_net.parameters(), lr=solver_step)
     total_params = sum(p.numel() for p in cbf_qcqp_net.parameters())
     print(f"Number of parameters: {total_params}")
@@ -190,30 +219,54 @@ def train_net(data, args, dir_dict=None):
     # For each epoch
     for epoch in range(nepochs):
         epoch_stats = {}  # statistics for this epoach
+        epoch_start_time = time.time()
 
         with torch.no_grad():
             # Get valid loss
             cbf_qcqp_net.eval()
             for valid_batch in valid_loader:
-                Xvalid = valid_batch[0].to(DEVICE)
-                Yvalid = valid_batch[1].to(DEVICE)
-                eval_net(data, Xvalid, Yvalid, cbf_qcqp_net, args, "valid", epoch_stats)
+                Xvalid = valid_batch[0].to(args["device"])
+                Yvalid = valid_batch[1].to(args["device"])
+                Y0valid = valid_batch[3].to(args["device"])
+                cbf_qcqp_net.z0 = Y0valid
+                eval_net(
+                    data,
+                    Xvalid,
+                    Yvalid.unsqueeze(-1),
+                    cbf_qcqp_net,
+                    args,
+                    "valid",
+                    epoch_stats,
+                )
 
             # Get test loss
             cbf_qcqp_net.eval()
             for test_batch in test_loader:
-                Xtest = test_batch[0].to(DEVICE)
-                Ytest = test_batch[1].to(DEVICE)
-                eval_net(data, Xtest, Ytest, cbf_qcqp_net, args, "test", epoch_stats)
+                Xtest = test_batch[0].to(args["device"])
+                Ytest = test_batch[1].to(args["device"])
+                Y0test = test_batch[3].to(args["device"])
+                cbf_qcqp_net.z0 = Y0test
+                eval_net(
+                    data,
+                    Xtest,
+                    Ytest.unsqueeze(-1),
+                    cbf_qcqp_net,
+                    args,
+                    "test",
+                    epoch_stats,
+                )
 
         # Get train loss
         cbf_qcqp_net.train()
 
+        # for train_batch in tqdm(train_loader):
         for train_batch in train_loader:
-            Xtrain = train_batch[0].to(DEVICE)
-            Ytrain = train_batch[1].to(DEVICE).unsqueeze(-1)
+            Xtrain = train_batch[0].to(args["device"])
+            Ytrain = train_batch[1].to(args["device"]).unsqueeze(-1)
             start_time = time.time()
             optimizer.zero_grad(set_to_none=True)
+            Y0train = train_batch[3].to(args["device"])
+            cbf_qcqp_net.z0 = Y0train
             Yhat_train = cbf_qcqp_net(Xtrain)
             train_loss = total_loss(data, Xtrain, Ytrain, Yhat_train, args)
             train_loss.sum().backward()
@@ -221,6 +274,9 @@ def train_net(data, args, dir_dict=None):
             train_time = time.time() - start_time
             # print(f"{train_time = }")
             dict_agg(epoch_stats, "train_loss", train_loss.detach().cpu().numpy())
+
+        epoch_time = time.time() - epoch_start_time
+        # print(f"{epoch_time = }")
 
         utils.printInBoldBlue(
             "Epoch {}: train loss {:.4f}/{:.4f}, valid loss {:.4f}/{:.4f}, test loss {:.4f}/{:.4f}".format(
@@ -235,29 +291,17 @@ def train_net(data, args, dir_dict=None):
         )
 
         # Print to TensorBoard
-        writer.add_scalars(
-            "loss",
-            {
-                "train": np.mean(epoch_stats["train_loss"]),
-                "valid": np.mean(epoch_stats["valid_loss"]),
-                "test": np.mean(epoch_stats["test_loss"]),
-            },
-            epoch,
-        )
-        writer.flush()
-
-        # Log all statistics
-        if args["save_all_stats"]:
-            if epoch == 0:
-                for key in epoch_stats.keys():
-                    stats[key] = np.expand_dims(np.array(epoch_stats[key]), axis=0)
-            else:
-                for key in epoch_stats.keys():
-                    stats[key] = np.concatenate(
-                        (stats[key], np.expand_dims(np.array(epoch_stats[key]), axis=0))
-                    )
-        else:
-            stats = epoch_stats
+        if board:
+            writer.add_scalars(
+                "loss",
+                {
+                    "train": np.mean(epoch_stats["train_loss"]),
+                    "valid": np.mean(epoch_stats["valid_loss"]),
+                    "test": np.mean(epoch_stats["test_loss"]),
+                },
+                epoch,
+            )
+            writer.flush()
 
         # Early stop if not improving
         earlyStopper(
@@ -266,19 +310,39 @@ def train_net(data, args, dir_dict=None):
             stats,
             dir_dict["save_dir"],
         )
+
+        # Log all statistics
+        if not earlyStopper.counting_stop:
+            if args["save_all_stats"]:
+                if epoch == 0:
+                    for key in epoch_stats.keys():
+                        stats[key] = np.expand_dims(np.array(epoch_stats[key]), axis=0)
+                else:
+                    for key in epoch_stats.keys():
+                        stats[key] = np.concatenate(
+                            (
+                                stats[key],
+                                np.expand_dims(np.array(epoch_stats[key]), axis=0),
+                            )
+                        )
+            else:
+                stats = epoch_stats
+
         if earlyStopper.early_stop:
             utils.printInBoldRed("\nEarlyStopping: stop training!")
+            with open(os.path.join(dir_dict["save_dir"], "stats.dict"), "rb") as f:
+                final_data = pickle.load(f)
             utils.printInBoldGreen(
                 "normalized train loss {:.4f}, valid loss {:.4f}, test loss {:.4f}".format(
-                    train_truth_obj / np.mean(epoch_stats["train_loss"]),
-                    valid_truth_obj / np.mean(epoch_stats["valid_loss"]),
-                    test_truth_obj / np.mean(epoch_stats["test_loss"]),
+                    train_truth_obj / np.mean(final_data["train_loss"][-1]),
+                    valid_truth_obj / np.mean(final_data["valid_loss"][-1]),
+                    test_truth_obj / np.mean(final_data["test_loss"][-1]),
                 )
             )
             break
 
-    writer.close()
-
+    if board:
+        writer.close()
     return cbf_qcqp_net, stats
 
 
@@ -287,7 +351,7 @@ def total_loss(data, X, Y, Yhat, args):
     Output: obj_cost (nsamples, 1)"""
 
     if args["loss_type"] == "supervised":
-        obj_cost = torch.square(Y - Yhat)
+        obj_cost = torch.square(Y - Yhat).sum(1)
     else:
         Xo = data.getXo(X)
         data.updateObjective(Xo)
@@ -333,7 +397,7 @@ def eval_net(data, X, Y, net, args, prefix, stats):
 
 
 @torch.no_grad()
-def infer_net(data, args, dir_dict=None):
+def infer_net(model, data, args, dir_dict=None):
     "Intuitvely evaluate random test data by inference"
 
     dataset = TensorDataset(data.X, data.Y, data.obj_val)
@@ -344,14 +408,15 @@ def infer_net(data, args, dir_dict=None):
             data.train_num + data.valid_num + data.test_num,
         ),
     )
-    model = CbfQcqpNet(data, args)
+
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
     total_time = 0.0
 
-    num = len(test_dataset)
-    for i in range(128):
+    # num = len(test_dataset)
+    num = 128
+    for i in range(num):
         idx = np.random.randint(0, num)
         X, Y, obj_val = test_dataset[idx]
         X = X.unsqueeze(0)
@@ -364,65 +429,8 @@ def infer_net(data, args, dir_dict=None):
         utils.printInBoldGreen(f"{Yopt = }\n{Ynn  = }")
         print("--")
 
-    infer_time = total_time / 128
+    infer_time = total_time / num
     print(f"{infer_time=}")
-
-
-###################################################################
-# MODEL
-###################################################################
-class CbfQcqpNet(nn.Module):
-    def __init__(self, data, args):
-        super().__init__()
-        self._data = data
-        self._args = args
-
-        # number of hidden layers and its size
-        layer_sizes = [
-            self._data.x_dim,
-            self._args["hidden_size"],
-            self._args["hidden_size"],
-            self._args["hidden_size"],
-        ]
-        # layers = reduce(
-        #     operator.add,
-        #     [
-        #         # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
-        #         [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
-        #         for a, b in zip(layer_sizes[0:-1], layer_sizes[1:])
-        #     ],
-        # )
-
-        layers = [
-            nn.Linear(layer_sizes[0], layer_sizes[1]),
-            nn.ReLU(),
-            # nn.BatchNorm1d(layer_sizes[1]),
-            nn.Linear(layer_sizes[1], layer_sizes[2]),
-            nn.ReLU(),
-            nn.Linear(layer_sizes[1], layer_sizes[2]),
-        ]
-
-        for layer in layers:
-            if type(layer) == nn.Linear:
-                nn.init.kaiming_normal_(layer.weight)
-
-        self.nn_layer = nn.Sequential(*layers)
-
-        self.rayen_layer = constraint_module.ConstraintModule(
-            layer_sizes[-1],
-            self._data.xc_dim,
-            self._data.y_dim,
-            self._args["method"],
-            self._data.num_cstr,
-            self._data.cstrInputMap,
-        )
-
-    def forward(self, x):
-        x = x.squeeze(-1)
-        xv = self.nn_layer(x)
-        xc = x[:, self._data.xo_dim : self._data.xo_dim + self._data.xc_dim]
-        y = self.rayen_layer(xv, xc)
-        return y
 
 
 if __name__ == "__main__":
