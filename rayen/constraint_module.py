@@ -532,7 +532,10 @@ class ConstraintModule(torch.nn.Module):
         self.updateSubspaceConstraints()  # torch!!
 
         # Solve interior point
+        start_time = time.time()
         self.z0 = self.solveInteriorPoint()
+        total_time = (time.time() - start_time) / self.batch_size
+        print(f"average interior point solving time {total_time}")
         # self.z0 = torch.tensor([[0.0], [0.0]]).repeat(self.batch_size, 1, 1)
         # print(f"z0 = {self.z0}")
 

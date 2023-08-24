@@ -57,13 +57,13 @@ def main():
     # Define problem
     args = {
         "prob_type": "cbf_qp",
-        "xo": 6,
-        "xc": 12,
-        "nsamples": 52326,
+        "xo": 12,
+        "xc": 24,
+        "nsamples": 25045,
         "method": "RAYEN",
         "loss_type": "unsupervised",
-        "epochs": 200,
-        "batch_size": 128,
+        "epochs": 500,
+        "batch_size": 256,
         "lr": 5e-3,
         "hidden_size": 256,
         "save_all_stats": True,  # otherwise, save latest stats only

@@ -32,7 +32,7 @@ from examples.early_stopping import EarlyStopping
 # pickle is lazy and does not serialize class definitions or function
 # definitions. Instead it saves a reference of how to find the class
 # (the module it lives in and its name)
-from CbfQcqpProblem import CbfQcqpProblem
+from CbfSocProblem import CbfSocProblem
 
 # DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 DEVICE = torch.device("cpu")
@@ -40,37 +40,35 @@ DEVICE = torch.device("cpu")
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
-# generate axes object
-ax = plt.axes()
-ax.set_box_aspect(1)
-
-# set limits
-plt.xlim(-1.2, 1.2)
-plt.ylim(-1.2, 1.2)
-plt.xlabel("Velocity x")
-plt.ylabel("Velocity y")
-circle1 = patches.Circle((0.0, 0.0), radius=1.0, color="red", fill=False)
-ax.add_patch(circle1)
-
 
 def main():
-    utils.printInBoldBlue("CBF-QCQP Problem")
+    utils.printInBoldBlue("CBF-SOC Problem")
     print(f"{DEVICE = }")
     # Define problem
     args = {
-        "prob_type": "cbf_qcqp",
-        "xo": 2,
-        "xc": 4,
-        "nsamples": 15405,
+        "prob_type": "cbf_soc",
+        "xo": 3,
+        "xc": 6,
+        "nsamples": 15000,
         "method": "RAYEN",
-        "hidden_size": 128,
+        "loss_type": "unsupervised",
+        "epochs": 100,
+        "batch_size": 64,
+        "lr": 5e-3,
+        "hidden_size": 64,
+        "save_all_stats": True,  # otherwise, save latest stats only
+        "res_save_freq": 5,
+        "estop_patience": 5,
+        "estop_delta": 0,  # improving rate of loss
+        "device": DEVICE,
+        "board": False,
     }
     print(args)
 
     # Load data, and put on GPU if needed
     prob_type = args["prob_type"]
-    if prob_type == "cbf_qcqp":
-        filepath = "data/cbf_qcqp_dataset_xo{}_xc{}_ex{}".format(
+    if prob_type == "cbf_soc":
+        filepath = "data/cbf_soc_dataset_xo{}_xc{}_ex{}".format(
             args["xo"], args["xc"], args["nsamples"]
         )
     else:
@@ -92,22 +90,51 @@ def main():
 
     utils.printInBoldBlue("START INFERENCE")
     dir_dict["infer_dir"] = os.path.join(
-        "results", str(data), "Aug23_13-51-49", "model.dict"
+        "results", str(data), "Aug23_22-31-40", "model.dict"
     )
 
-    model = CbfQcqpNet(data, args)
+    # MODEL
+    nn_layer = nn.Sequential(
+        nn.Linear(args["xo"] + args["xc"] + args["xo"], args["hidden_size"]),
+        nn.BatchNorm1d(args["hidden_size"]),
+        nn.ReLU(),
+        nn.Linear(args["hidden_size"], args["hidden_size"]),
+        nn.BatchNorm1d(args["hidden_size"]),
+        nn.ReLU(),
+        nn.Linear(args["hidden_size"], args["xo"]),
+    )
+
+    model = constraint_module2.ConstraintModule(
+        args["xo"],
+        args["xc"],
+        args["xo"],
+        args["method"],
+        data.num_cstr,
+        data.cstrInputMap,
+        nn_layer,
+    )
+
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
-    x0 = torch.Tensor([[[0.0], [0.0]]])  # shape = (1, n, 1)
-    v0 = torch.Tensor([[[1], [0.0]]])  # shape = (1, n, 1)
-    x0_n = torch.Tensor([[[0.0], [0.0]]])  # shape = (1, n, 1)
-    v0_n = torch.Tensor([[[-1], [0.0]]])  # shape = (1, n, 1)
+    x0 = torch.Tensor([[[0.0], [0.0], [0.0]]])  # shape = (1, n, 1)
+    v0 = torch.Tensor([[[0.2], [0.0], [0.8]]])  # shape = (1, n, 1)
+    x0_n = x0.clone()
+    v0_n = v0.clone()
 
     system = DoubleIntegrator(x0, v0, 1e-2)
     system_n = DoubleIntegrator(x0_n, v0_n, 1e-2)
     u_filtered = None
     un_filtered = None
+
+    x_saved = np.empty((3, 1))
+    v_saved = np.empty((3, 1))
+    unom_saved = np.empty((3, 1))
+    uf_saved = np.empty((3, 1))
+    xn_saved = np.empty((3, 1))
+    vn_saved = np.empty((3, 1))
+    unf_saved = np.empty((3, 1))
+
     with torch.no_grad():
         for i in range(100):
             x, v = system.dynamics(u_filtered)
@@ -115,59 +142,113 @@ def main():
             print(f"{x.squeeze() = }; {v.squeeze() = }")
             print(f"{xn.squeeze() = }; {vn.squeeze() = }")
 
+            x_saved = np.concatenate((x_saved, x.numpy()[0]), axis=1)
+            v_saved = np.concatenate((v_saved, v.numpy()[0]), axis=1)
+            xn_saved = np.concatenate((xn_saved, xn.numpy()[0]), axis=1)
+            vn_saved = np.concatenate((vn_saved, vn.numpy()[0]), axis=1)
+
             # print(torch.norm(v - vn))
 
             # u_nom = torch.distributions.uniform.Uniform(-1, 1.0).sample(
             #     [1, args["xo"], 1]
             # )  # (1, n, 1)
             # u_nom = 2 * torch.tensor([[[np.cos(i / 20)], [np.sin(i / 20)]]])
-            u_nom = torch.tensor([[[0.0], [2.0]]])
+            u_nom = torch.tensor([[[2.0], [0.0], [0.0]]])
+            unom_saved = np.concatenate((unom_saved, u_nom.numpy()[0]), axis=1)
 
             un_filtered = nn_infer(model, xn, vn, u_nom)
             u_filtered = opt_solve(x, v, u_nom)
-            print(torch.norm(u_filtered))
+
+            unf_saved = np.concatenate((unf_saved, un_filtered.numpy()[0]), axis=1)
+            uf_saved = np.concatenate((uf_saved, u_filtered.numpy()[0]), axis=1)
+
+            # print(torch.norm(u_filtered))
             # assert torch.norm(u_filtered) < 1.01
             # assert torch.norm(un_filtered) < 1.01 and torch.norm(u_filtered) < 1.01
 
             print(f"{u_nom.squeeze() = }; {u_filtered.squeeze() = }")
             print(f"{u_nom.squeeze() = }; {un_filtered.squeeze() = } \n")
 
-            # add something to axes
-            ax.scatter(vn.squeeze()[0], vn.squeeze()[1], s=100.0, c="orange")
-            ax.scatter(v.squeeze()[0], v.squeeze()[1], s=100.0, c="blue", alpha=0.5)
-            ax.quiver(
-                vn.squeeze()[0],
-                vn.squeeze()[1],
-                u_nom.squeeze()[0],
-                u_nom.squeeze()[1],
-                scale=20,
-                color="orange",
-            )
-            ax.quiver(
-                v.squeeze()[0],
-                v.squeeze()[1],
-                u_nom.squeeze()[0],
-                u_nom.squeeze()[1],
-                scale=20,
-                color="blue",
-                alpha=0.5,
-            )
+    # generate axes object
+    ax = plt.subplot(3, 1, 1)
+    # plt.ylim(-1.2, 1.2)
+    # plt.xlabel("Timestep")
+    # plt.ylabel("Position")
+    # ax.plot(
+    #     xn_saved[0, 1:],
+    #     c="#7ccba2",
+    #     linewidth=2,
+    #     marker="o",
+    #     markersize=4,
+    #     label="pos xn",
+    # )
+    # ax.plot(
+    #     xn_saved[1, 1:],
+    #     c="#f0746e",
+    #     linewidth=2,
+    #     marker="o",
+    #     markersize=4,
+    #     label="pos yn",
+    # )
+    # ax.plot(x_saved[0, 1:], c="#045275", label="pos x", linewidth=2)
+    # ax.plot(x_saved[1, 1:], c="#7c1d6f", label="pos y", linewidth=2)
+    # plt.axhline(y=1, color="r", linestyle="dashed", label="upper limit")
+    # plt.axhline(y=-1, color="r", linestyle="dashed", label="lower limit")
+    # plt.legend()
 
-            # draw the plot
-            plt.draw()
-            plt.pause(0.2)  # is necessary for the plot to update for some reason
+    ax = plt.subplot(3, 1, 2)
+    plt.ylim(-1.2, 1.2)
+    plt.xlabel("Timestep")
+    plt.ylabel("Velocity")
+    ax.plot(
+        vn_saved[0, 1:],
+        c="#7ccba2",
+        linewidth=2,
+        marker="o",
+        markersize=4,
+        label="vel xn",
+    )
+    ax.plot(
+        vn_saved[1, 1:],
+        c="#f0746e",
+        linewidth=2,
+        marker="o",
+        markersize=4,
+        label="vel yn",
+    )
+    ax.plot(v_saved[0, 1:], c="#045275", label="vel x", linewidth=2)
+    ax.plot(v_saved[1, 1:], c="#7c1d6f", label="vel y", linewidth=2)
+    plt.axhline(y=1, color="r", linestyle="dashed", label="upper limit")
+    plt.axhline(y=-1, color="r", linestyle="dashed", label="lower limit")
+    plt.legend()
 
-            # start removing points if you don't want all shown
-            if i > 0:
-                ax.collections[0].remove()
+    ax = plt.subplot(3, 1, 3)
+    plt.ylim(-1.2, 1.2)
+    plt.xlabel("Timestep")
+    plt.ylabel("Accel/Control")
+    ax.plot(
+        unf_saved[0, 1:],
+        c="#7ccba2",
+        linewidth=2,
+        marker="o",
+        markersize=4,
+        label="accel xn",
+    )
+    ax.plot(
+        unf_saved[1, 1:],
+        c="#f0746e",
+        linewidth=2,
+        marker="o",
+        markersize=4,
+        label="accel yn",
+    )
+    ax.plot(uf_saved[0, 1:], c="#045275", label="accel x", linewidth=2)
+    ax.plot(uf_saved[1, 1:], c="#7c1d6f", label="accel y", linewidth=2)
+    plt.axhline(y=1, color="r", linestyle="dashed", label="upper limit")
+    plt.axhline(y=-1, color="r", linestyle="dashed", label="lower limit")
+    plt.legend()
 
-                ax.collections[0].remove()
-                # plt.legend(["nn", "opt"], loc=2)
-                ax.collections[0].remove()
-
-                ax.collections[0].remove()
-                # ax.collections[0].remove()
-                plt.legend(["limit", "nn", "opt"], loc=2)
+    plt.show()
 
 
 def nn_infer(model, xn, vn, u_nom):
@@ -182,10 +263,10 @@ def nn_infer(model, xn, vn, u_nom):
 
 def opt_solve(x, v, u_nom):
     xc = torch.cat([u_nom, x, v], 1).squeeze(-1)
-    problem = CbfQcqpProblem(xc, 2, 4, 2)
+    problem = CbfSocProblem(xc, 3, 6, 3)
     problem.updateObjective()
     problem.updateConstraints()
-    problem.calc_Y(tol=1e-2)
+    problem.computeY(tol=1e-2)
     u_filtered = problem.Y
     u_filtered.nelement() == 0 and utils.printInBoldRed("Solver failed")
     return u_filtered.unsqueeze(-1)
@@ -265,7 +346,7 @@ class CbfQcqpNet(nn.Module):
 
         self.nn_layer = nn.Sequential(*layers)
 
-        self.rayen_layer = constraint_module2.ConstraintModule(
+        self.rayen_layer = constraint_module.ConstraintModule(
             layer_sizes[-1],
             self._data.xc_dim,
             self._data.y_dim,

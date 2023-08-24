@@ -57,9 +57,9 @@ def main():
     # Define problem
     args = {
         "prob_type": "cbf_qcqp",
-        "xo": 3,
-        "xc": 6,
-        "nsamples": 11990,
+        "xo": 2,
+        "xc": 4,
+        "nsamples": 15405,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 200,
@@ -107,9 +107,9 @@ def main():
         nn.Linear(args["hidden_size"], args["hidden_size"]),
         nn.BatchNorm1d(args["hidden_size"]),
         nn.ReLU(),
-        nn.Linear(args["hidden_size"], args["hidden_size"]),
+        # nn.Linear(args["hidden_size"], args["hidden_size"]),
         # nn.BatchNorm1d(args["hidden_size"]),
-        nn.ReLU(),
+        # nn.ReLU(),
         nn.Linear(args["hidden_size"], args["xo"]),
     )
 
@@ -123,7 +123,7 @@ def main():
         nn_layer,
     )
 
-    TRAIN = 1
+    TRAIN = 0
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -140,7 +140,7 @@ def main():
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug23_11-29-31", "model.dict"
+            "results", str(data), "Aug24_12-12-12", "model.dict"
         )
         infer_net(cbf_qcqp_net, data, args, dir_dict)
     print(args)
@@ -253,7 +253,7 @@ def train_net(cbf_qcqp_net, data, args, dir_dict=None):
             start_time = time.time()
             optimizer.zero_grad(set_to_none=True)
             Y0train = train_batch[3].to(args["device"])
-            cbf_qcqp_net.z0 = Y0train
+            cbf_qcqp_net.z0 = Y0train  # provide interior point
             Yhat_train = cbf_qcqp_net(Xtrain)
             train_loss = total_loss(data, Xtrain, Ytrain, Yhat_train, args)
             train_loss.sum().backward()
@@ -399,24 +399,32 @@ def infer_net(model, data, args, dir_dict=None):
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
-    total_time = 0.0
+    # total_time = 0.0
 
-    # num = len(test_dataset)
-    num = 128
-    for i in range(num):
-        idx = np.random.randint(0, num)
-        X, Y, obj_val = test_dataset[idx]
-        X = X.unsqueeze(0)
+    # # num = len(test_dataset)
+    # num = 128
+    # for i in range(num):
+    #     idx = np.random.randint(0, num)
+    #     X, Y, obj_val = test_dataset[idx]
+    #     X = X.unsqueeze(0)
+    #     start_time = time.time()
+    #     Ynn = model(X).squeeze().numpy()
+    #     total_time += time.time() - start_time
+    #     Xo = X.squeeze().numpy()
+    #     print(f"{Xo   = }")
+    #     Yopt = Y.numpy()
+    #     utils.printInBoldGreen(f"{Yopt = }\n{Ynn  = }")
+    #     print("--")
+
+    test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
+    for test_batch in test_loader:
+        Xtest = test_batch[0].to(args["device"])
         start_time = time.time()
-        Ynn = model(X).squeeze().numpy()
-        total_time += time.time() - start_time
-        Xo = X.squeeze().numpy()
-        print(f"{Xo   = }")
-        Yopt = Y.numpy()
-        utils.printInBoldGreen(f"{Yopt = }\n{Ynn  = }")
-        print("--")
+        Ytest_nn = model(Xtest)
+        total_time = time.time() - start_time
 
-    infer_time = total_time / num
+    print(f"{len(test_dataset) = }")
+    infer_time = total_time / len(test_dataset)
     print(f"{infer_time=}")
 
 

@@ -37,8 +37,8 @@ from examples.early_stopping import EarlyStopping
 # (the module it lives in and its name)
 from CbfQpProblem import CbfQpProblem
 
-DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-# DEVICE = torch.device("cpu")
+# DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+DEVICE = torch.device("cpu")
 torch.set_default_device(DEVICE)
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
@@ -58,20 +58,20 @@ def main():
     print(f"{DEVICE = }")
     # Define problem
     args = {
-        "xo": 1,
-        "xc": 2,
-        "nsamples": 12869,
+        "xo": 2,
+        "xc": 4,
+        "nsamples": 7673,
         "epochs": 200,
-        "batch_size": 256,
-        "lr": 1e-5,
-        "hidden_size": 512,
+        "batch_size": 64,
+        "lr": 5e-3,
+        "hidden_size": 64,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
-        "estop_patience": 100,
-        "estop_delta": 0.01,  # improving rate of loss
+        "estop_patience": 20,
+        "estop_delta": 0.0,  # improving rate of loss
         "seed": seed,
         "device": DEVICE,
-        "board": False,
+        "board": True,
     }
     print(args)
 
@@ -94,7 +94,7 @@ def main():
     data._device = args["device"]
     dir_dict = {}
 
-    TRAIN = 1
+    TRAIN = 0
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -115,7 +115,7 @@ def main():
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", "ipnn", str(data), "Aug21_23-02-08", "model.dict"
+            "results", "ipnn", str(data), "Aug24_09-30-32", "model.dict"
         )
         infer_net(data, args, dir_dict)
     print(args)
@@ -314,7 +314,7 @@ def eval_net(data, X, Y, net, args, prefix, stats):
     dict_agg(
         stats,
         make_prefix("loss"),
-        criterion(Yhat, Y).detach().cpu().numpy(),
+        criterion(Yhat, Y.squeeze(-1)).detach().cpu().numpy(),
     )
     return stats
 
@@ -339,23 +339,30 @@ def infer_net(data, args, dir_dict=None):
     X_dummy = torch.Tensor(500, data.xc_dim, 1).uniform_(-0.5, 0.5)
     _ = model(X_dummy.to(args["device"]))
 
-    total_time = 0.0
+    # total_time = 0.0
 
-    num = len(test_dataset)
-    for i in range(50):
-        idx = np.random.randint(0, num)
-        X, Y0 = test_dataset[idx]
-        X = X.unsqueeze(0)
+    # num = len(test_dataset)
+    # for i in range(50):
+    #     idx = np.random.randint(0, num)
+    #     X, Y0 = test_dataset[idx]
+    #     X = X.unsqueeze(0)
+    #     start_time = time.time()
+    #     Ynn = model(X)
+    #     # total_time += time.time() - start_time
+    #     Xo = X[0][0]
+    #     # print(f"{Xo   = :.4f}")
+    #     utils.printInBoldGreen(f"{Y0 = }\n{Ynn  = }")
+    #     print("--")
+
+    test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
+    for test_batch in test_loader:
+        Xtest = test_batch[0].to(args["device"])
         start_time = time.time()
-        Ynn = model(X).item()
-        total_time += time.time() - start_time
-        Xo = X[0][0].item()
-        # print(f"{Xo   = :.4f}")
-        Y0 = Y0.item()
-        utils.printInBoldGreen(f"{Y0 = :.4f}\n{Ynn  = :.4f}")
-        print("--")
+        Ytest_nn = model(Xtest)
+        total_time = time.time() - start_time
 
-    infer_time = total_time / 50
+    print(f"{len(test_dataset) = }")
+    infer_time = total_time / len(test_dataset)
     print(f"{infer_time=}")
 
 
@@ -385,19 +392,21 @@ class IpNet(nn.Module):
 
         layers = [
             # nn.BatchNorm1d(layer_sizes[0]),
-            nn.Linear(layer_sizes[0], layer_sizes[1]),
+            nn.Linear(4, layer_sizes[1]),
+            nn.BatchNorm1d(layer_sizes[1]),
             nn.ReLU(),
-            nn.Dropout(p=0.4),
+            # nn.Dropout(p=0.4),
             # nn.BatchNorm1d(layer_sizes[1]),
             nn.Linear(layer_sizes[1], layer_sizes[2]),
+            nn.BatchNorm1d(layer_sizes[2]),
             nn.ReLU(),
-            nn.Dropout(p=0.4),
+            # nn.Dropout(p=0.4),
             # nn.BatchNorm1d(layer_sizes[2]),
             # nn.Linear(layer_sizes[1], layer_sizes[2]),
             # nn.ReLU(),
             # nn.Dropout(p=0.4),
             # nn.BatchNorm1d(layer_sizes[2]),
-            nn.Linear(layer_sizes[2], 1),
+            nn.Linear(layer_sizes[2], 2),
         ]
 
         for layer in layers:

@@ -15,6 +15,7 @@ from torch.utils.data import TensorDataset, DataLoader
 
 import sys
 import os
+import time
 
 sys.path.insert(1, os.path.join(sys.path[0], os.pardir, os.pardir))
 
@@ -49,11 +50,11 @@ def check_balance(problem, dataset):
 
 if __name__ == "__main__":
     utils.printInBoldBlue("Generating dataset")
-    num_samples = 5000
-    xo_dim = 1  # nominal control u_bar dimension
-    y_dim = 1  # filtered control, output of the network
-    pos_dim = 1
-    vel_dim = 1
+    num_samples = 10000
+    xo_dim = 2  # nominal control u_bar dimension
+    y_dim = 2  # filtered control, output of the network
+    pos_dim = 2
+    vel_dim = 2
     xc_dim = pos_dim + vel_dim  # state x dimension
 
     np.random.seed(1999)
@@ -73,15 +74,15 @@ if __name__ == "__main__":
     #         xoj = np.random.uniform(-1, 1.0, size=(1, xo_dim))
     #         X = np.vstack((X, np.hstack([xoj, xc])))
 
-    for i in range(int(num_samples)):
-        # for i in range(2):
-        xc = X[i : i + 1, xo_dim:].T
-        A1, b1, *_ = problem.cstrInputMap(torch.tensor(xc))
-        for j in range(5):
-            xoj = np.random.uniform(-1, 1.0, size=(xo_dim, 1))
-            if torch.all((A1) @ torch.tensor(xoj) <= (b1)):
-                # print(xoj)
-                X = np.vstack([X, np.vstack([xoj, xc]).T])
+    # for i in range(int(num_samples)):
+    #     # for i in range(2):
+    #     xc = X[i : i + 1, xo_dim:].T
+    #     A1, b1, *_ = problem.cstrInputMap(torch.tensor(xc))
+    #     for j in range(5):
+    #         xoj = np.random.uniform(-1, 1.0, size=(xo_dim, 1))
+    #         if torch.all((A1) @ torch.tensor(xoj) <= (b1)):
+    #             # print(xoj)
+    #             X = np.vstack([X, np.vstack([xoj, xc]).T])
 
     np.random.shuffle(X)
 
@@ -134,15 +135,18 @@ if __name__ == "__main__":
     # Xo = torch.tensor([[1.1], [2.0]])
     # Xc = torch.tensor([[0.8, 0.1], [0.7, 0.6]])
     # Y = layer(Xo, Xc)  # 3D
+    start_time = time.time()
     Y = layer(problem.Xo.squeeze(-1), problem.Xc.squeeze(-1))  # 3D
+    infer_time = (time.time() - start_time) / (Y.shape[0])
+    print(f"nn infer time = {infer_time}")
     problem.updateInteriorPoint(layer.z0)  # 3D
     print(f"{problem.Y0 = }")
     print(f"{layer.isFeasible(problem.Y0, 1e-4)}")
 
-    with open(
-        "./data/cbf_qp_dataset2_xo{}_xc{}_ex{}".format(
-            xo_dim, xc_dim, problem.nsamples
-        ),
-        "wb",
-    ) as f:
-        pickle.dump(problem, f)
+    # with open(
+    #     "./data/cbf_qp_dataset2_xo{}_xc{}_ex{}".format(
+    #         xo_dim, xc_dim, problem.nsamples
+    #     ),
+    #     "wb",
+    # ) as f:
+    #     pickle.dump(problem, f)

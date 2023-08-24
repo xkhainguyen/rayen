@@ -61,9 +61,9 @@ def main():
         "prob_type": "cbf_qcqp",
         "xo": 2,
         "xc": 4,
-        "nsamples": 11660,
+        "nsamples": 15405,
         "method": "RAYEN",
-        "hidden_size": 64,
+        "hidden_size": 128,
     }
     print(args)
 
@@ -92,7 +92,7 @@ def main():
 
     utils.printInBoldBlue("START INFERENCE")
     dir_dict["infer_dir"] = os.path.join(
-        "results", str(data), "Aug22_10-08-48", "model.dict"
+        "results", str(data), "Aug23_13-51-49", "model.dict"
     )
 
     model = CbfQcqpNet(data, args)
@@ -134,6 +134,7 @@ def main():
 
             # add something to axes
             ax.scatter(vn.squeeze()[0], vn.squeeze()[1], s=100.0, c="orange")
+            ax.scatter(v.squeeze()[0], v.squeeze()[1], s=100.0, c="blue", alpha=0.5)
             ax.quiver(
                 vn.squeeze()[0],
                 vn.squeeze()[1],
@@ -142,7 +143,6 @@ def main():
                 scale=20,
                 color="orange",
             )
-            ax.scatter(v.squeeze()[0], v.squeeze()[1], s=100.0, c="blue", alpha=0.5)
             ax.quiver(
                 v.squeeze()[0],
                 v.squeeze()[1],
@@ -161,12 +161,13 @@ def main():
             if i > 0:
                 ax.collections[0].remove()
 
-                ax.collections[1].remove()
+                ax.collections[0].remove()
                 # plt.legend(["nn", "opt"], loc=2)
-                ax.collections[2].remove()
+                ax.collections[0].remove()
 
-                ax.collections[3].remove()
-                plt.legend(["limit", "opt", "", "nn", ""], loc=2)
+                ax.collections[0].remove()
+                # ax.collections[0].remove()
+                plt.legend(["limit", "nn", "opt"], loc=2)
 
 
 def nn_infer(model, xn, vn, u_nom):

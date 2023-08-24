@@ -32,7 +32,7 @@ from examples.early_stopping import EarlyStopping
 # pickle is lazy and does not serialize class definitions or function
 # definitions. Instead it saves a reference of how to find the class
 # (the module it lives in and its name)
-from CbfQcqpProblem import CbfQcqpProblem
+from CbfSocProblem import CbfSocProblem
 
 # DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 DEVICE = torch.device("cpu")
@@ -40,34 +40,22 @@ DEVICE = torch.device("cpu")
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
-# generate axes object
-ax = plt.axes()
-ax.set_box_aspect(1)
-
-# set limits
-plt.xlim(-1.2, 1.2)
-plt.ylim(-1.2, 1.2)
-plt.xlabel("Velocity x")
-plt.ylabel("Velocity y")
-circle1 = patches.Circle((0.0, 0.0), radius=1.0, color="red", fill=False)
-ax.add_patch(circle1)
-
 
 def main():
-    utils.printInBoldBlue("CBF-QCQP Problem")
+    utils.printInBoldBlue("CBF-SOC Problem")
     print(f"{DEVICE = }")
     # Define problem
     args = {
-        "prob_type": "cbf_qcqp",
-        "xo": 2,
-        "xc": 4,
-        "nsamples": 10786,
+        "prob_type": "cbf_soc",
+        "xo": 3,
+        "xc": 6,
+        "nsamples": 15000,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 100,
         "batch_size": 64,
-        "lr": 6e-3,
-        "hidden_size": 32,
+        "lr": 5e-3,
+        "hidden_size": 64,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
         "estop_patience": 5,
@@ -79,8 +67,8 @@ def main():
 
     # Load data, and put on GPU if needed
     prob_type = args["prob_type"]
-    if prob_type == "cbf_qcqp":
-        filepath = "data/cbf_qcqp_dataset_xo{}_xc{}_ex{}".format(
+    if prob_type == "cbf_soc":
+        filepath = "data/cbf_soc_dataset_xo{}_xc{}_ex{}".format(
             args["xo"], args["xc"], args["nsamples"]
         )
     else:
@@ -102,7 +90,7 @@ def main():
 
     utils.printInBoldBlue("START INFERENCE")
     dir_dict["infer_dir"] = os.path.join(
-        "results", str(data), "Aug23_12-52-47", "model.dict"
+        "results", str(data), "Aug23_22-31-40", "model.dict"
     )
 
     # MODEL
@@ -129,10 +117,19 @@ def main():
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
-    x0 = torch.Tensor([[[0.0], [0.0]]])  # shape = (1, n, 1)
-    v0 = torch.Tensor([[[1], [0.0]]])  # shape = (1, n, 1)
-    x0_n = torch.Tensor([[[0.0], [0.0]]])  # shape = (1, n, 1)
-    v0_n = torch.Tensor([[[1], [0.0]]])  # shape = (1, n, 1)
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_xlabel("Vel x")
+    ax.set_ylabel("Vel y")
+    ax.set_zlabel("Vel z")
+    ax.set_xlim(-1.2, 1.2)
+    ax.set_ylim(-1.2, 1.2)
+    ax.set_zlim(-1.2, 1.2)
+
+    x0 = torch.Tensor([[[0.0], [0.0], [0.0]]])  # shape = (1, n, 1)
+    v0 = torch.Tensor([[[0.5], [0.5], [0.5]]])  # shape = (1, n, 1)
+    x0_n = x0.clone()
+    v0_n = v0.clone()
 
     system = DoubleIntegrator(x0, v0, 1e-2)
     system_n = DoubleIntegrator(x0_n, v0_n, 1e-2)
@@ -151,7 +148,7 @@ def main():
             #     [1, args["xo"], 1]
             # )  # (1, n, 1)
             # u_nom = 2 * torch.tensor([[[np.cos(i / 20)], [np.sin(i / 20)]]])
-            u_nom = torch.tensor([[[0.0], [2.0]]])
+            u_nom = torch.tensor([[[2.0], [0.0], [0.0]]])
 
             un_filtered = nn_infer(model, xn, vn, u_nom)
             u_filtered = opt_solve(x, v, u_nom)
@@ -163,25 +160,40 @@ def main():
             print(f"{u_nom.squeeze() = }; {un_filtered.squeeze() = } \n")
 
             # add something to axes
-            ax.scatter(vn.squeeze()[0], vn.squeeze()[1], s=100.0, c="orange")
-            ax.quiver(
-                vn.squeeze()[0],
-                vn.squeeze()[1],
-                u_nom.squeeze()[0],
-                u_nom.squeeze()[1],
-                scale=20,
-                color="orange",
+            def draw_quiver(p1, p2, color, **kwargs):
+                len = torch.norm(p1 - p2).numpy()
+                ax.quiver(
+                    p1.squeeze()[0],
+                    p1.squeeze()[1],
+                    p1.squeeze()[2],
+                    p2.squeeze()[0],
+                    p2.squeeze()[1],
+                    p2.squeeze()[0],
+                    # scale=20,
+                    length=len / 5,
+                    color=color,
+                    **kwargs,
+                )
+
+            draw_quiver(vn, u_nom, "gray", alpha=0.2)
+            draw_quiver(v, u_nom, "gray", alpha=0.2)
+
+            # nn green
+            ax.scatter(
+                vn.squeeze()[0], vn.squeeze()[1], vn.squeeze()[2], s=100.0, c="#7ccba2"
             )
-            ax.scatter(v.squeeze()[0], v.squeeze()[1], s=100.0, c="blue", alpha=0.5)
-            ax.quiver(
+            draw_quiver(vn, un_filtered, "#7ccba2")
+
+            # opt orange
+            ax.scatter(
                 v.squeeze()[0],
                 v.squeeze()[1],
-                u_nom.squeeze()[0],
-                u_nom.squeeze()[1],
-                scale=20,
-                color="blue",
-                alpha=0.5,
+                v.squeeze()[2],
+                s=100.0,
+                c="#f0746e",
+                alpha=1,
             )
+            draw_quiver(v, u_filtered, "#f0746e", alpha=1)
 
             # draw the plot
             plt.draw()
@@ -189,14 +201,15 @@ def main():
 
             # start removing points if you don't want all shown
             if i > 0:
+                # n = len(ax.collections)
                 ax.collections[0].remove()
-
-                ax.collections[1].remove()
+                ax.collections[0].remove()
                 # plt.legend(["nn", "opt"], loc=2)
-                ax.collections[2].remove()
-
-                ax.collections[3].remove()
-                plt.legend(["limit", "opt", "", "nn", ""], loc=2)
+                ax.collections[0].remove()
+                ax.collections[0].remove()
+                ax.collections[0].remove()
+                ax.collections[0].remove()
+                # plt.legend(["limit", "opt", "", "nn", ""], loc=2)
 
 
 def nn_infer(model, xn, vn, u_nom):
@@ -211,7 +224,7 @@ def nn_infer(model, xn, vn, u_nom):
 
 def opt_solve(x, v, u_nom):
     xc = torch.cat([u_nom, x, v], 1).squeeze(-1)
-    problem = CbfQcqpProblem(xc, 2, 4, 2)
+    problem = CbfSocProblem(xc, 3, 6, 3)
     problem.updateObjective()
     problem.updateConstraints()
     problem.computeY(tol=1e-2)

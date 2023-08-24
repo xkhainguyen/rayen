@@ -551,9 +551,7 @@ class ConstraintModule(torch.nn.Module):
         self.updateSubspaceConstraints()  # torch!!
 
         # Solve interior point
-        # if not self.train:
-        if self.z0 is None:
-            self.z0 = self.solveInteriorPoint()
+        self.z0 = self.solveInteriorPoint()
         # print(f"z0 = {self.z0}")
 
         # Update and register all necessary parameters

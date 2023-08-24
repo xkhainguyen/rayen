@@ -49,11 +49,11 @@ def check_balance(problem, dataset):
 
 if __name__ == "__main__":
     utils.printInBoldBlue("Generating dataset")
-    num_samples = 50000
-    xo_dim = 6  # nominal control u_bar dimension
-    y_dim = 6  # filtered control, output of the network
-    pos_dim = 6
-    vel_dim = 6
+    num_samples = 120000
+    xo_dim = 12  # nominal control u_bar dimension
+    y_dim = 12  # filtered control, output of the network
+    pos_dim = 12
+    vel_dim = 12
     xc_dim = pos_dim + vel_dim  # state x dimension
 
     np.random.seed(1999)
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     Xc_vel = np.random.uniform(-1, 1.0, size=(num_samples, vel_dim))
     X = np.hstack((Xo, Xc_pos, Xc_vel))
 
-    problem = CbfQpProblem(X, xo_dim, xc_dim, y_dim, valid_frac=0.1, test_frac=0.1)
+    problem = CbfQpProblem(X, xo_dim, xc_dim, y_dim, valid_frac=0.08, test_frac=0.08)
 
     # Augment the intact samples
     # for i in range(num_samples):
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         A1, b1, *_ = problem.cstrInputMap(torch.tensor(xc))
         for j in range(50):
             xoj = np.random.uniform(-1, 1.0, size=(xo_dim, 1))
-            if torch.all((A1) @ torch.tensor(xoj) <= (b1)):
+            if torch.all(A1 @ torch.tensor(xoj) <= b1):
                 # print(xoj)
                 X = np.vstack([X, np.vstack([xoj, xc]).T])
 
