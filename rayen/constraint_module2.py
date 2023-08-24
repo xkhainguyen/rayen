@@ -387,9 +387,9 @@ class ConstraintModule(torch.nn.Module):
             *params,
             solver_args={
                 "solve_method": self.solver,
-                "feastol": 1e-2,
-                "reltol": 1e-2,
-                "abstol": 1e-3,
+                "feastol": 1e-4,
+                "reltol": 1e-4,
+                "abstol": 1e-4,
                 "reltol_inacc": 1e-5,
             },
         )  # "max_iters": 10000
@@ -552,6 +552,7 @@ class ConstraintModule(torch.nn.Module):
 
         # Solve interior point
         self.z0 = self.solveInteriorPoint()
+        # self.z0 = torch.zeros(3, 1).repeat(self.batch_size, 1, 1)
         # print(f"z0 = {self.z0}")
 
         # Update and register all necessary parameters

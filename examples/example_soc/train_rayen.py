@@ -59,7 +59,7 @@ def main():
         "prob_type": "cbf_soc",
         "xo": 3,
         "xc": 6,
-        "nsamples": 14997,
+        "nsamples": 15000,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 100,
@@ -120,7 +120,7 @@ def main():
         nn_layer,
     )
 
-    TRAIN = 1
+    TRAIN = 0
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -400,7 +400,7 @@ def eval_net(data, X, Y, net, args, prefix, stats):
 def infer_net(model, data, args, dir_dict=None):
     "Intuitvely evaluate random test data by inference"
 
-    dataset = TensorDataset(data.X, data.Y, data.obj_val)
+    dataset = TensorDataset(data.X, data.Y, data.obj_val, data.Y0)
     test_dataset = torch.utils.data.Subset(
         dataset,
         range(
@@ -412,24 +412,34 @@ def infer_net(model, data, args, dir_dict=None):
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
-    total_time = 0.0
+    # total_time = 0.0
 
-    # num = len(test_dataset)
-    num = 128
-    for i in range(num):
-        idx = np.random.randint(0, num)
-        X, Y, obj_val = test_dataset[idx]
-        X = X.unsqueeze(0)
+    # # num = len(test_dataset)
+    # num = 128
+    # for i in range(num):
+    #     idx = np.random.randint(0, num)
+    #     X, Y, obj_val = test_dataset[idx]
+    #     X = X.unsqueeze(0)
+    #     start_time = time.time()
+    #     Ynn = model(X).squeeze().numpy()
+    #     total_time += time.time() - start_time
+    #     Xo = X.squeeze().numpy()
+    #     print(f"{Xo   = }")
+    #     Yopt = Y.numpy()
+    #     utils.printInBoldGreen(f"{Yopt = }\n{Ynn  = }")
+    #     print("--")
+
+    test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
+    for test_batch in test_loader:
+        Xtest = test_batch[0].to(args["device"])
+        Y0test = test_batch[3].to(args["device"])
+        model.z0 = Y0test
         start_time = time.time()
-        Ynn = model(X).squeeze().numpy()
-        total_time += time.time() - start_time
-        Xo = X.squeeze().numpy()
-        print(f"{Xo   = }")
-        Yopt = Y.numpy()
-        utils.printInBoldGreen(f"{Yopt = }\n{Ynn  = }")
-        print("--")
+        Ytest_nn = model(Xtest)
+        total_time = time.time() - start_time
 
-    infer_time = total_time / num
+    print(f"{len(test_dataset) = }")
+    infer_time = total_time / len(test_dataset)
     print(f"{infer_time=}")
 
 

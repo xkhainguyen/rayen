@@ -41,15 +41,14 @@ torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
 # generate axes object
-ax = plt.axes()
+fig = plt.figure(figsize=(8, 8))
+ax = fig.add_subplot(111)
 ax.set_box_aspect(1)
 
 # set limits
 plt.xlim(-1.2, 1.2)
 plt.ylim(-1.2, 1.2)
-plt.xlabel("Velocity x")
-plt.ylabel("Velocity y")
-circle1 = patches.Circle((0.0, 0.0), radius=1.0, color="red", fill=False)
+circle1 = patches.Circle((0.0, 0.0), radius=1.0, color="black", fill=False)
 ax.add_patch(circle1)
 
 
@@ -63,7 +62,7 @@ def main():
         "xc": 4,
         "nsamples": 15405,
         "method": "RAYEN",
-        "hidden_size": 128,
+        "hidden_size": 64,
     }
     print(args)
 
@@ -92,24 +91,54 @@ def main():
 
     utils.printInBoldBlue("START INFERENCE")
     dir_dict["infer_dir"] = os.path.join(
-        "results", str(data), "Aug23_13-51-49", "model.dict"
+        "results", str(data), "Aug24_12-12-12", "model.dict"
+    )
+    # MODEL
+    nn_layer = nn.Sequential(
+        nn.Linear(args["xo"] + args["xc"] + args["xo"], args["hidden_size"]),
+        nn.BatchNorm1d(args["hidden_size"]),
+        nn.ReLU(),
+        nn.Linear(args["hidden_size"], args["hidden_size"]),
+        nn.BatchNorm1d(args["hidden_size"]),
+        nn.ReLU(),
+        nn.Linear(args["hidden_size"], args["xo"]),
     )
 
-    model = CbfQcqpNet(data, args)
+    model = constraint_module2.ConstraintModule(
+        args["xo"],
+        args["xc"],
+        args["xo"],
+        args["method"],
+        data.num_cstr,
+        data.cstrInputMap,
+        nn_layer,
+    )
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
+    time_opt_sum = 0
+    time_nn_sum = 0
+
     x0 = torch.Tensor([[[0.0], [0.0]]])  # shape = (1, n, 1)
-    v0 = torch.Tensor([[[1], [0.0]]])  # shape = (1, n, 1)
+    v0 = torch.Tensor([[[0.95], [0.0]]])  # shape = (1, n, 1)
     x0_n = torch.Tensor([[[0.0], [0.0]]])  # shape = (1, n, 1)
-    v0_n = torch.Tensor([[[-1], [0.0]]])  # shape = (1, n, 1)
+    v0_n = torch.Tensor([[[0.95], [0.0]]])  # shape = (1, n, 1)
 
     system = DoubleIntegrator(x0, v0, 1e-2)
     system_n = DoubleIntegrator(x0_n, v0_n, 1e-2)
     u_filtered = None
     un_filtered = None
+
+    steps = 200
+
+    plt.draw()
+    plt.pause(10)
+    utils.printInBoldBlue("STARTTTTTTTTTTTTTTTTTTT")
+    plt.pause(3.5)
+
     with torch.no_grad():
-        for i in range(100):
+        for i in range(steps):
+            utils.printInBoldBlue(f"step = {i}")
             x, v = system.dynamics(u_filtered)
             xn, vn = system_n.dynamics(un_filtered)
             print(f"{x.squeeze() = }; {v.squeeze() = }")
@@ -120,11 +149,15 @@ def main():
             # u_nom = torch.distributions.uniform.Uniform(-1, 1.0).sample(
             #     [1, args["xo"], 1]
             # )  # (1, n, 1)
-            # u_nom = 2 * torch.tensor([[[np.cos(i / 20)], [np.sin(i / 20)]]])
-            u_nom = torch.tensor([[[0.0], [2.0]]])
+            u_nom = 1.1 * torch.tensor([[[np.cos(i / 20)], [0.9 * np.sin(i / 20)]]])
+            # u_nom = torch.tensor([[[0.0], [1.1]]])
 
-            un_filtered = nn_infer(model, xn, vn, u_nom)
-            u_filtered = opt_solve(x, v, u_nom)
+            un_filtered, time_nn = nn_infer(model, xn, vn, u_nom)
+            u_filtered, time_opt = opt_solve(x, v, u_nom)
+
+            time_nn_sum += time_nn
+            time_opt_sum += time_opt
+
             print(torch.norm(u_filtered))
             # assert torch.norm(u_filtered) < 1.01
             # assert torch.norm(un_filtered) < 1.01 and torch.norm(u_filtered) < 1.01
@@ -132,42 +165,49 @@ def main():
             print(f"{u_nom.squeeze() = }; {u_filtered.squeeze() = }")
             print(f"{u_nom.squeeze() = }; {un_filtered.squeeze() = } \n")
 
-            # add something to axes
-            ax.scatter(vn.squeeze()[0], vn.squeeze()[1], s=100.0, c="orange")
-            ax.scatter(v.squeeze()[0], v.squeeze()[1], s=100.0, c="blue", alpha=0.5)
-            ax.quiver(
-                vn.squeeze()[0],
-                vn.squeeze()[1],
+            ###############
+            ## DRAW CONTROL
+            ###############
+            size = 200.0
+            ax.scatter(
+                un_filtered.squeeze()[0],
+                un_filtered.squeeze()[1],
+                s=size,
+                c="#f0746e",
+                marker="*",
+                alpha=0.7,
+            )
+            ax.scatter(
+                u_filtered.squeeze()[0],
+                u_filtered.squeeze()[1],
+                s=size,
+                c="#7ccba2",
+                marker="*",
+                alpha=0.7,
+            )
+            ax.scatter(
                 u_nom.squeeze()[0],
                 u_nom.squeeze()[1],
-                scale=20,
-                color="orange",
+                s=size,
+                c="gray",
+                marker="*",
+                alpha=1,
             )
-            ax.quiver(
-                v.squeeze()[0],
-                v.squeeze()[1],
-                u_nom.squeeze()[0],
-                u_nom.squeeze()[1],
-                scale=20,
-                color="blue",
-                alpha=0.5,
-            )
-
             # draw the plot
             plt.draw()
             plt.pause(0.2)  # is necessary for the plot to update for some reason
 
             # start removing points if you don't want all shown
+            plt.xlabel("x")
+            plt.ylabel("y")
             if i > 0:
-                ax.collections[0].remove()
+                [ax.collections[0].remove() for _ in range(3)]
+                plt.legend(["limit", "u_nn", "u_opt", "u_nom"], loc=2)
 
-                ax.collections[0].remove()
-                # plt.legend(["nn", "opt"], loc=2)
-                ax.collections[0].remove()
-
-                ax.collections[0].remove()
-                # ax.collections[0].remove()
-                plt.legend(["limit", "nn", "opt"], loc=2)
+    plt.draw()
+    plt.pause(5)
+    print(f"average nn time = {time_nn_sum/steps}")
+    print(f"average opt time = {time_opt_sum/steps}")
 
 
 def nn_infer(model, xn, vn, u_nom):
@@ -177,7 +217,7 @@ def nn_infer(model, xn, vn, u_nom):
     infer_time = time.time() - start_time
     print(f"inference time = {infer_time}")
     un_filtered.nelement() == 0 and utils.printInBoldRed("NN failed")
-    return un_filtered
+    return un_filtered, infer_time
 
 
 def opt_solve(x, v, u_nom):
@@ -185,10 +225,12 @@ def opt_solve(x, v, u_nom):
     problem = CbfQcqpProblem(xc, 2, 4, 2)
     problem.updateObjective()
     problem.updateConstraints()
-    problem.calc_Y(tol=1e-2)
+    start_time = time.time()
+    problem.computeY(tol=1e-2)
+    opt_time = time.time() - start_time
     u_filtered = problem.Y
     u_filtered.nelement() == 0 and utils.printInBoldRed("Solver failed")
-    return u_filtered.unsqueeze(-1)
+    return u_filtered.unsqueeze(-1), opt_time
 
 
 ###################################################################
@@ -223,63 +265,6 @@ class DoubleIntegrator:
         self._x += self._v * self.dt
         self._t += self.dt
         return self.x, self.v
-
-
-###################################################################
-# MODEL
-###################################################################
-class CbfQcqpNet(nn.Module):
-    def __init__(self, data, args):
-        super().__init__()
-        self._data = data
-        self._args = args
-
-        # number of hidden layers and its size
-        layer_sizes = [
-            self._data.x_dim,
-            self._args["hidden_size"],
-            self._args["hidden_size"],
-            self._args["hidden_size"],
-        ]
-        # layers = reduce(
-        #     operator.add,
-        #     [
-        #         # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
-        #         [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
-        #         for a, b in zip(layer_sizes[0:-1], layer_sizes[1:])
-        #     ],
-        # )
-
-        layers = [
-            nn.Linear(layer_sizes[0], layer_sizes[1]),
-            nn.ReLU(),
-            # nn.BatchNorm1d(layer_sizes[1]),
-            nn.Linear(layer_sizes[1], layer_sizes[2]),
-            nn.ReLU(),
-            nn.Linear(layer_sizes[1], layer_sizes[2]),
-        ]
-
-        for layer in layers:
-            if type(layer) == nn.Linear:
-                nn.init.kaiming_normal_(layer.weight)
-
-        self.nn_layer = nn.Sequential(*layers)
-
-        self.rayen_layer = constraint_module2.ConstraintModule(
-            layer_sizes[-1],
-            self._data.xc_dim,
-            self._data.y_dim,
-            self._args["method"],
-            self._data.num_cstr,
-            self._data.cstrInputMap,
-        )
-
-    def forward(self, x):
-        x = x.squeeze(-1)
-        xv = self.nn_layer(x)
-        xc = x[:, self._data.xo_dim : self._data.xo_dim + self._data.xc_dim]
-        y = self.rayen_layer(xv, xc)
-        return y
 
 
 if __name__ == "__main__":

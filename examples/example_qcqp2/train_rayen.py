@@ -57,9 +57,9 @@ def main():
     # Define problem
     args = {
         "prob_type": "cbf_qcqp",
-        "xo": 2,
-        "xc": 4,
-        "nsamples": 15405,
+        "xo": 3,
+        "xc": 6,
+        "nsamples": 11990,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 200,
@@ -140,7 +140,7 @@ def main():
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug24_12-12-12", "model.dict"
+            "results", str(data), "Aug24_12-08-38", "model.dict"
         )
         infer_net(cbf_qcqp_net, data, args, dir_dict)
     print(args)
@@ -387,7 +387,7 @@ def eval_net(data, X, Y, net, args, prefix, stats):
 def infer_net(model, data, args, dir_dict=None):
     "Intuitvely evaluate random test data by inference"
 
-    dataset = TensorDataset(data.X, data.Y, data.obj_val)
+    dataset = TensorDataset(data.X, data.Y, data.obj_val, data.Y0)
     test_dataset = torch.utils.data.Subset(
         dataset,
         range(
@@ -419,6 +419,8 @@ def infer_net(model, data, args, dir_dict=None):
     test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
     for test_batch in test_loader:
         Xtest = test_batch[0].to(args["device"])
+        Y0test = test_batch[3].to(args["device"])
+        model.z0 = Y0test
         start_time = time.time()
         Ytest_nn = model(Xtest)
         total_time = time.time() - start_time

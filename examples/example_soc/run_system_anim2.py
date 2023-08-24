@@ -41,6 +41,53 @@ torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
 
+def soc(x, y):
+    return np.sqrt(x**2 + y**2) / 5
+
+
+# SOC
+u_soc, v_soc = np.mgrid[0 : 2 * np.pi : 20j, 0 : np.pi : 10j]
+x_soc = np.cos(u_soc) * np.sin(v_soc)
+y_soc = np.sin(u_soc) * np.sin(v_soc)
+z_soc = soc(x_soc, y_soc)
+
+# Sphere
+radius = 1
+theta = np.linspace(0, 2.0 * np.pi, 40)
+phi = np.linspace(0, np.pi, 40)
+x_sphere = radius * np.outer(np.cos(theta), np.sin(phi))
+y_sphere = radius * np.outer(np.sin(theta), np.sin(phi))
+z_sphere = radius * np.outer(np.ones(np.size(theta)), np.cos(phi))
+
+# Plot option
+fig = plt.figure(figsize=(8, 8))
+ax = fig.add_subplot(111, projection="3d")
+ax.set_xlabel("accel control x")
+ax.set_ylabel("accel control y")
+ax.set_zlabel("accel control z")
+ax.set_xlim(-1.0, 1.0)
+ax.set_ylim(-1.0, 1.0)
+ax.set_zlim(-1, 1)
+ax.set_box_aspect([1, 1, 1])
+ax.view_init(elev=4, azim=-66)
+
+
+def draw_quiver(p1, p2, color, **kwargs):
+    len = torch.norm(p2).numpy()
+    ax.quiver(
+        p1.squeeze()[0],
+        p1.squeeze()[1],
+        p1.squeeze()[2],
+        p2.squeeze()[0],
+        p2.squeeze()[1],
+        p2.squeeze()[2],
+        # scale=20,
+        length=len,
+        color=color,
+        **kwargs,
+    )
+
+
 def main():
     utils.printInBoldBlue("CBF-SOC Problem")
     print(f"{DEVICE = }")
@@ -117,43 +164,11 @@ def main():
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
-    fig = plt.figure(figsize=(8, 8))
-    ax = fig.add_subplot(111, projection="3d")
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
-    ax.set_xlim(-1.2, 1.2)
-    ax.set_ylim(-1.2, 1.2)
-    ax.set_zlim(-1.2, 1.2)
-
-    radius = 1
-    theta = np.linspace(0, 2.0 * np.pi, 40)
-    phi = np.linspace(0, np.pi, 40)
-    x_sphere = radius * np.outer(np.cos(theta), np.sin(phi))
-    y_sphere = radius * np.outer(np.sin(theta), np.sin(phi))
-    z_sphere = radius * np.outer(np.ones(np.size(theta)), np.cos(phi))
-    ax.set_box_aspect([1, 1, 1])
-
-    def draw_quiver(p1, p2, color, **kwargs):
-        len = torch.norm(p2).numpy()
-        ax.quiver(
-            p1.squeeze()[0],
-            p1.squeeze()[1],
-            p1.squeeze()[2],
-            p2.squeeze()[0],
-            p2.squeeze()[1],
-            p2.squeeze()[2],
-            # scale=20,
-            length=len,
-            color=color,
-            **kwargs,
-        )
-
     time_opt_sum = 0
     time_nn_sum = 0
 
     x0 = torch.Tensor([[[0.0], [0.0], [0.0]]])  # shape = (1, n, 1)
-    v0 = torch.Tensor([[[0.45], [0.45], [0.4]]])  # shape = (1, n, 1)
+    v0 = torch.Tensor([[[0.1], [0.1], [-0.2]]])  # shape = (1, n, 1)
     x0_n = x0.clone()
     v0_n = v0.clone()
 
@@ -162,11 +177,11 @@ def main():
     u_filtered = None
     un_filtered = None
 
-    steps = 300
-    plt.draw()
-    plt.pause(5)
-    utils.printInBoldBlue("STARTTTTTTTTTTTTTTTTTTT")
-    plt.pause(3.5)
+    steps = 400
+    # plt.draw()
+    # plt.pause(5)
+    # utils.printInBoldBlue("STARTTTTTTTTTTTTTTTTTTT")
+    # plt.pause(3.5)
     with torch.no_grad():
         for i in range(steps):
             utils.printInBoldBlue(f"step = {i}")
@@ -180,8 +195,16 @@ def main():
             # u_nom = torch.distributions.uniform.Uniform(-1, 1.0).sample(
             #     [1, args["xo"], 1]
             # )  # (1, n, 1)
-            # u_nom = 2 * torch.tensor([[[np.cos(i / 20)], [np.sin(i / 20)]]])
-            u_nom = torch.tensor([[[0.6], [0.6], [-0.6]]])
+            u_nom = 0.5 * torch.tensor(
+                [
+                    [
+                        [2.3 * np.cos(i / 20)],
+                        [2.3 * np.sin(i / 20)],
+                        [0.5 * np.sin(i / 20) + 0.5],
+                    ]
+                ]
+            )
+            # u_nom = torch.tensor([[[0.1], [0.1], [-0.01]]])
 
             un_filtered, time_nn = nn_infer(model, xn, vn, u_nom)
             u_filtered, time_opt = opt_solve(x, v, u_nom)
@@ -195,64 +218,41 @@ def main():
 
             # add something to axes
             size = 200.0
-            # nn orange #f0746e
             ax.scatter(
-                vn.squeeze()[0],
-                vn.squeeze()[1],
-                vn.squeeze()[2],
+                un_filtered.squeeze()[0],
+                un_filtered.squeeze()[1],
+                un_filtered.squeeze()[2],
                 s=size,
                 c="#f0746e",
-                alpha=0.7,
+                marker="*",
             )
-            # draw_quiver(vn, un_filtered, "#f0746e")
-
-            # opt green #7ccba2
             ax.scatter(
-                v.squeeze()[0],
-                v.squeeze()[1],
-                v.squeeze()[2],
+                u_filtered.squeeze()[0],
+                u_filtered.squeeze()[1],
+                u_filtered.squeeze()[2],
                 s=size,
                 c="#7ccba2",
+                marker="*",
                 alpha=1,
             )
-            # draw_quiver(v, u_filtered, "#7ccba2", alpha=1)
-
-            # ax.scatter(
-            #     un_filtered.squeeze()[0],
-            #     un_filtered.squeeze()[1],
-            #     un_filtered.squeeze()[2],
-            #     s=size,
-            #     c="#f0746e",
-            #     marker="*",
-            # )
-            # ax.scatter(
-            #     u_filtered.squeeze()[0],
-            #     u_filtered.squeeze()[1],
-            #     u_filtered.squeeze()[2],
-            #     s=size,
-            #     c="#7ccba2",
-            #     marker="*",
-            #     alpha=0.5,
-            # )
-            # ax.scatter(
-            #     u_nom.squeeze()[0],
-            #     u_nom.squeeze()[1],
-            #     u_nom.squeeze()[2],
-            #     s=size,
-            #     c="gray",
-            #     marker="*",
-            #     alpha=0.2,
-            # )
+            ax.scatter(
+                u_nom.squeeze()[0],
+                u_nom.squeeze()[1],
+                u_nom.squeeze()[2],
+                s=size,
+                c="gray",
+                marker="*",
+                alpha=1,
+            )
+            ax.plot_surface(x_soc, y_soc, z_soc, color="#3c93c2", alpha=0.05)
+            ax.plot_surface(x_sphere, y_sphere, z_sphere, color="#fcde9c", alpha=0.04)
             # draw the plot
             plt.draw()
             plt.pause(0.0001)  # is necessary for the plot to update for some reason
-            draw_quiver(vn, u_nom, "gray", alpha=0.5)
-            draw_quiver(v, u_nom, "gray", alpha=0.5)
-            ax.plot_surface(x_sphere, y_sphere, z_sphere, color="#fcde9c", alpha=0.06)
             # start removing points if you don't want all shown
             if i > 0:
                 [ax.collections[0].remove() for _ in range(5)]
-                plt.legend(["v_nn", "v_opt", "u_nom"], loc=2)
+                plt.legend(["u_nn", "u_opt", "u_nom"], loc=2)
 
     print(f"average nn time = {time_nn_sum/steps}")
     print(f"average opt time = {time_opt_sum/steps}")
