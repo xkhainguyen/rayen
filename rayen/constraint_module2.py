@@ -30,10 +30,12 @@ class ConstraintModule(torch.nn.Module):
         xo_dim=None,
         xc_dim=None,
         y_dim=None,
-        method="RAYEN",
+        method="RAYEN1",
+        ip_nn=None,
         num_cstr=None,
         cstrInputMap=None,
         net=None,
+        training=False,
     ):
         super().__init__()
 
@@ -46,6 +48,8 @@ class ConstraintModule(torch.nn.Module):
         self.cstrInputMap = cstrInputMap
         self.net = net
         self.z0 = None
+        self.ip_nn = ip_nn
+        self.training = training
 
         self.cs = constraints_torch.ConvexConstraints(num_cstr)
         self.params_indexes = {"qc": None, "soc": None, "lmi": None}
@@ -63,7 +67,11 @@ class ConstraintModule(torch.nn.Module):
 
         self.selectSolver()
 
-        if self.method == "RAYEN":
+        if (
+            self.method == "RAYEN1"
+            or self.method == "RAYEN2"
+            or self.method == "RAYEN3"
+        ):
             # Handle dimensions of ambient and embedded space
             if self.cs.has_linear_eq_constraints:
                 self.n = self.k - 1  # Just one linear equality constraint
@@ -72,7 +80,8 @@ class ConstraintModule(torch.nn.Module):
 
             create_step_input_map = True if self.n != self.m else False
 
-            self.setupInteriorPointLayer()
+            if self.ip_nn is None:
+                self.setupInteriorPointLayer()
 
             self.forwardForMethod = self.forwardForRAYEN
 
@@ -551,7 +560,14 @@ class ConstraintModule(torch.nn.Module):
         self.updateSubspaceConstraints()  # torch!!
 
         # Solve interior point
-        self.z0 = self.solveInteriorPoint()
+        if self.method == "RAYEN1":  # Use IP solver
+            if self.training is False:
+                self.z0 = self.solveInteriorPoint()
+        if self.method == "RAYEN2":  # Replace IP solver with IP NN
+            if self.training is False:
+                self.z0 = self.ip_nn(xc.squeeze(-1)).unsqueeze(-1)
+        if self.method == "RAYEN3":  # Trained with IP NN
+            self.z0 = self.ip_nn(xc.squeeze(-1)).unsqueeze(-1).detach()
         # self.z0 = torch.zeros(3, 1).repeat(self.batch_size, 1, 1)
         # print(f"z0 = {self.z0}")
 

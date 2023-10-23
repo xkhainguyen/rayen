@@ -30,25 +30,26 @@ torch.manual_seed(seed)
 np.random.seed(seed)
 
 
-# with open(
-#     "/home/khai/SSD/Code/rayen/examples/example_qcqp2/results/QcqpProblem-2-4-8040/Aug23_11-29-31/args.dict",
-#     "rb",
-# ) as f:
-#     data = pickle.load(f)
-
 with open(
-    "/home/khai/SSD/Code/rayen/examples/example_soc/data/cbf_soc_dataset_xo3_xc6_ex13427",
+    "/home/khai/SSD/Code/rayen/examples/example_soc/results/SocProblem-3-6-15000/Aug23_22-31-40/args.dict",
     "rb",
 ) as f:
     data = pickle.load(f)
-for attr in dir(data):
-    var = getattr(data, attr)
-    if not callable(var) and not attr.startswith("__") and torch.is_tensor(var):
-        try:
-            setattr(data, attr, var.to(DEVICE))
-        except AttributeError:
-            pass
-dataset = TensorDataset(data.X, data.Y)
-num = 10
-for i in range(num):
-    print(dataset[i])
+print(data)
+
+# with open(
+#     "/home/khai/SSD/Code/rayen/examples/example_soc/data/cbf_soc_dataset_xo3_xc6_ex13427",
+#     "rb",
+# ) as f:
+#     data = pickle.load(f)
+# for attr in dir(data):
+#     var = getattr(data, attr)
+#     if not callable(var) and not attr.startswith("__") and torch.is_tensor(var):
+#         try:
+#             setattr(data, attr, var.to(DEVICE))
+#         except AttributeError:
+#             pass
+# dataset = TensorDataset(data.X, data.Y)
+# num = 10
+# for i in range(num):
+#     print(dataset[i])

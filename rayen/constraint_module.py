@@ -394,17 +394,27 @@ class ConstraintModule(torch.nn.Module):
             params += [self.cs.lmis.F]
 
         # print(params)
-
-        ip_z0, ip_epsilon, ip_y = self.ip_layer(
-            *params,
-            solver_args={
-                "solve_method": self.solver,
-                "feastol": 1e-2,
-                "reltol": 1e-2,
-                "abstol": 1e-3,
-                "reltol_inacc": 1e-5,
-            },
-        )  # "max_iters": 10000
+        if self.solver == "ECOS":
+            ip_z0, ip_epsilon, ip_y = self.ip_layer(
+                *params,
+                solver_args={
+                    "solve_method": self.solver,
+                    "feastol": 1e-2,
+                    "reltol": 1e-2,
+                    "abstol": 1e-3,
+                    "reltol_inacc": 1e-5,
+                },
+            )
+        elif self.solver == "SCS":
+            ip_z0, ip_epsilon, ip_y = self.ip_layer(
+                *params,
+                solver_args={
+                    "solve_method": self.solver,
+                    "eps": 1e-2,
+                },
+            )
+        else:
+            return NotImplementedError
         # print(f"epsilon = {ip_epsilon}")
 
         return ip_z0
@@ -532,10 +542,10 @@ class ConstraintModule(torch.nn.Module):
         self.updateSubspaceConstraints()  # torch!!
 
         # Solve interior point
-        start_time = time.time()
+        # start_time = time.time()
         self.z0 = self.solveInteriorPoint()
-        total_time = (time.time() - start_time) / self.batch_size
-        print(f"average interior point solving time {total_time}")
+        # total_time = (time.time() - start_time) / self.batch_size
+        # print(f"average interior point solving time {total_time}")
         # self.z0 = torch.tensor([[0.0], [0.0]]).repeat(self.batch_size, 1, 1)
         # print(f"z0 = {self.z0}")
 

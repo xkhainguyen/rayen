@@ -50,10 +50,10 @@ def check_balance(problem, dataset):
 if __name__ == "__main__":
     utils.printInBoldBlue("Generating dataset")
     num_samples = 5000000
-    xo_dim = 10  # nominal control u_bar dimension
-    y_dim = 10  # filtered control, output of the network
-    pos_dim = 10
-    vel_dim = 10
+    xo_dim = 12  # nominal control u_bar dimension
+    y_dim = 12  # filtered control, output of the network
+    pos_dim = 12
+    vel_dim = 12
     xc_dim = pos_dim + vel_dim  # state x dimension
 
     np.random.seed(1999)

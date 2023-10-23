@@ -193,8 +193,8 @@ class RppExample:
         A2, b2 = getEmpty(), getEmpty()
         temp1 = torch.tensor([[0.0, 1, 0, 0]])
         temp2 = torch.tensor([[0, 0.0, 1, 0], [0, 0, 0, 1]])
-        r = temp1 @ x * 0.5
-        c = temp2 @ x * 0.1
+        r = temp1 @ x
+        c = temp2 @ x
         P, P_sqrt, q, r = getSphereConstraint(r, c)
         M, s, c, d = getNoneSocConstraints()
         F = getNoneLmiConstraints()

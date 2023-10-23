@@ -57,15 +57,15 @@ def main():
     # Define problem
     args = {
         "prob_type": "cbf_qp",
-        "xo": 12,
-        "xc": 24,
-        "nsamples": 25045,
+        "xo": 6,
+        "xc": 12,
+        "nsamples": 52326,
         "method": "RAYEN",
         "loss_type": "unsupervised",
         "epochs": 500,
-        "batch_size": 256,
+        "batch_size": 128,
         "lr": 5e-3,
-        "hidden_size": 256,
+        "hidden_size": 128,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
         "estop_patience": 20,
@@ -120,7 +120,7 @@ def main():
         nn_layer,
     )
 
-    TRAIN = 1
+    TRAIN = 0
 
     if TRAIN:
         utils.printInBoldBlue("START TRAINING")
@@ -137,7 +137,7 @@ def main():
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", str(data), "Aug22_20-53-33", "model.dict"
+            "results", str(data), "Aug23_20-50-02", "model.dict"
         )
         infer_net(cbf_qp_net, data, args, dir_dict)
     print(args)
@@ -381,7 +381,7 @@ def eval_net(data, X, Y, net, args, prefix, stats):
 def infer_net(model, data, args, dir_dict=None):
     "Intuitvely evaluate random test data by inference"
 
-    dataset = TensorDataset(data.X, data.Y, data.obj_val)
+    dataset = TensorDataset(data.X, data.Y, data.obj_val, data.Y0)
     test_dataset = torch.utils.data.Subset(
         dataset,
         range(
@@ -393,23 +393,17 @@ def infer_net(model, data, args, dir_dict=None):
     model.load_state_dict(torch.load(dir_dict["infer_dir"]))
     model.eval()
 
-    total_time = 0.0
-
-    num = len(test_dataset)
-    for i in range(128):
-        idx = np.random.randint(0, num)
-        X, Y, obj_val = test_dataset[idx]
-        X = X.unsqueeze(0)
+    test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
+    for test_batch in test_loader:
+        Xtest = test_batch[0].to(args["device"])
+        Y0test = test_batch[3].to(args["device"])
+        model.z0 = Y0test
         start_time = time.time()
-        Ynn = model(X).squeeze().numpy()
-        total_time += time.time() - start_time
-        Xo = X.squeeze().numpy()
-        print(f"{Xo   = }")
-        Yopt = Y.numpy()
-        utils.printInBoldGreen(f"{Yopt = }\n{Ynn  = }")
-        print("--")
+        Ytest_nn = model(Xtest)
+        total_time = time.time() - start_time
 
-    infer_time = total_time / 128
+    print(f"{len(test_dataset) = }")
+    infer_time = total_time / len(test_dataset)
     print(f"{infer_time=}")
 
 

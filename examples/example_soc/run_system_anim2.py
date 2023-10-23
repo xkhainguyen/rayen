@@ -40,6 +40,10 @@ DEVICE = torch.device("cpu")
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
+seed = 1999
+torch.manual_seed(seed)
+np.random.seed(seed)
+
 
 def soc(x, y):
     return np.sqrt(x**2 + y**2) / 5
@@ -97,18 +101,22 @@ def main():
         "xo": 3,
         "xc": 6,
         "nsamples": 15000,
-        "method": "RAYEN",
+        "method": "RAYEN2",
+        "training": False,
         "loss_type": "unsupervised",
-        "epochs": 100,
+        "epochs": 200,
         "batch_size": 64,
         "lr": 5e-3,
         "hidden_size": 64,
         "save_all_stats": True,  # otherwise, save latest stats only
         "res_save_freq": 5,
-        "estop_patience": 5,
+        "estop_patience": 10,
         "estop_delta": 0,  # improving rate of loss
+        "seed": seed,
         "device": DEVICE,
         "board": False,
+        "cbf_nn_dir": "Oct23_17-17-13",
+        "ip_nn_dir": "Oct23_15-12-34",
     }
     print(args)
 
@@ -136,9 +144,6 @@ def main():
     dir_dict = {}
 
     utils.printInBoldBlue("START INFERENCE")
-    dir_dict["infer_dir"] = os.path.join(
-        "results", str(data), "Aug23_22-31-40", "model.dict"
-    )
 
     # MODEL
     nn_layer = nn.Sequential(
@@ -150,19 +155,53 @@ def main():
         nn.ReLU(),
         nn.Linear(args["hidden_size"], args["xo"]),
     )
+    if (args["method"]) == "RAYEN1" or (args["method"]) == "RAYEN2":
+        dir_dict["infer_dir"] = os.path.join(
+            "results",
+            "RAYEN1" + "_" + str(data),
+            args["cbf_nn_dir"],
+            "model.dict",
+        )
+    else:
+        dir_dict["infer_dir"] = os.path.join(
+            "results",
+            "RAYEN3" + "_" + str(data),
+            args["cbf_nn_dir"],
+            "model.dict",
+        )
+    nn_layer.load_state_dict(torch.load(dir_dict["infer_dir"], map_location=DEVICE))
 
-    model = constraint_module2.ConstraintModule(
+    if (args["method"]) == "RAYEN2" or (args["method"]) == "RAYEN3":
+        ip_nn = nn.Sequential(
+            nn.Linear(args["xc"], args["hidden_size"]),
+            nn.BatchNorm1d(args["hidden_size"]),
+            nn.ReLU(),
+            nn.Linear(args["hidden_size"], args["hidden_size"]),
+            nn.BatchNorm1d(args["hidden_size"]),
+            nn.ReLU(),
+            nn.Linear(args["hidden_size"], args["xo"]),
+        )
+        # Load ip_nn
+        dir_dict["ip_nn_dir"] = os.path.join(
+            "results", "ipnn", str(data), args["ip_nn_dir"], "model.dict"
+        )
+        ip_nn.load_state_dict(torch.load(dir_dict["ip_nn_dir"], map_location=DEVICE))
+        ip_nn.eval()
+        print("ip_nn loaded")
+    else:
+        ip_nn = None
+
+    cbf_net = constraint_module2.ConstraintModule(
         args["xo"],
         args["xc"],
         args["xo"],
         args["method"],
+        ip_nn,
         data.num_cstr,
         data.cstrInputMap,
         nn_layer,
     )
-
-    model.load_state_dict(torch.load(dir_dict["infer_dir"]))
-    model.eval()
+    cbf_net.eval()
 
     time_opt_sum = 0
     time_nn_sum = 0
@@ -206,7 +245,7 @@ def main():
             )
             # u_nom = torch.tensor([[[0.1], [0.1], [-0.01]]])
 
-            un_filtered, time_nn = nn_infer(model, xn, vn, u_nom)
+            un_filtered, time_nn = nn_infer(cbf_net, xn, vn, u_nom)
             u_filtered, time_opt = opt_solve(x, v, u_nom)
             time_nn_sum += time_nn
             time_opt_sum += time_opt

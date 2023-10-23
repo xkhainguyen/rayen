@@ -16,6 +16,7 @@ from functools import reduce
 from torch.utils.data import TensorDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+import ipdb
 import numpy as np
 import pickle
 from tqdm import tqdm
@@ -35,7 +36,7 @@ from examples.early_stopping import EarlyStopping
 # pickle is lazy and does not serialize class definitions or function
 # definitions. Instead it saves a reference of how to find the class
 # (the module it lives in and its name)
-from CbfQpProblem import CbfQpProblem
+from CbfSocProblem import CbfSocProblem
 
 # DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 DEVICE = torch.device("cpu")
@@ -54,14 +55,14 @@ criterion = nn.MSELoss()
 
 
 def main():
-    utils.printInBoldBlue("CBF-QP Problem: Interior Point Network")
+    utils.printInBoldBlue("CBF-SOC Problem: Interior Point Network")
     print(f"{DEVICE = }")
     # Define problem
     args = {
-        "xo": 2,
-        "xc": 4,
-        "nsamples": 7673,
-        "epochs": 200,
+        "xo": 3,  # x_objective dimension = nominal control u_bar dimension = filtered control y dimension (output)
+        "xc": 6,  # x_constraint dimension = state x dimension
+        "nsamples": 15000,
+        "epochs": 100,
         "batch_size": 64,
         "lr": 5e-3,
         "hidden_size": 64,
@@ -76,7 +77,7 @@ def main():
     print(args)
 
     # Load data, and put on GPU if needed
-    filepath = "data/cbf_qp_dataset2_xo{}_xc{}_ex{}".format(
+    filepath = "data/cbf_soc_dataset_xo{}_xc{}_ex{}".format(
         args["xo"], args["xc"], args["nsamples"]
     )
 
@@ -94,6 +95,17 @@ def main():
     data._device = args["device"]
     dir_dict = {}
 
+    # MODEL
+    ip_net = nn.Sequential(
+        nn.Linear(args["xc"], args["hidden_size"]),
+        nn.BatchNorm1d(args["hidden_size"]),
+        nn.ReLU(),
+        nn.Linear(args["hidden_size"], args["hidden_size"]),
+        nn.BatchNorm1d(args["hidden_size"]),
+        nn.ReLU(),
+        nn.Linear(args["hidden_size"], args["xo"]),
+    )
+
     TRAIN = 0
 
     if TRAIN:
@@ -110,18 +122,18 @@ def main():
         with open(os.path.join(dir_dict["save_dir"], "args.dict"), "wb") as f:
             pickle.dump(args, f)
 
-        train_net(data, args, dir_dict)
+        train_net(ip_net, data, args, dir_dict)
         print(f"{dir_dict['save_dir'] = }")
     else:
         utils.printInBoldBlue("START INFERENCE")
         dir_dict["infer_dir"] = os.path.join(
-            "results", "ipnn", str(data), "Aug24_09-30-32", "model.dict"
+            "results", "ipnn", str(data), "Oct23_15-12-34", "model.dict"
         )
-        infer_net(data, args, dir_dict)
+        infer_net(ip_net, data, args, dir_dict)
     print(args)
 
 
-def train_net(data, args, dir_dict=None):
+def train_net(ip_net, data, args, dir_dict=None):
     board = args["board"]
     if board:
         os.system("pkill -f tensorboard")
@@ -175,7 +187,6 @@ def train_net(data, args, dir_dict=None):
     test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
 
     # Network
-    ip_net = IpNet(data, args)
     ip_net.to(args["device"])
     optimizer = optim.Adam(ip_net.parameters(), lr=solver_step)
     total_params = sum(p.numel() for p in ip_net.parameters())
@@ -216,7 +227,7 @@ def train_net(data, args, dir_dict=None):
             Ytrain = train_batch[1].to(args["device"]).squeeze(-1)
             start_time = time.time()
             optimizer.zero_grad(set_to_none=True)
-            Yhat_train = ip_net(Xtrain)
+            Yhat_train = ip_net(Xtrain.squeeze(-1))
             # train_loss = total_loss(data, Xtrain, Ytrain, Yhat_train, args)
             # train_loss.sum().mean().backward()
             train_loss = criterion(Yhat_train, Ytrain)
@@ -286,7 +297,7 @@ def total_loss(data, X, Y, Yhat, args):
     """Compute loss for batch X in supervised manner
     Don't use average here, only for evaluating
     Output: obj_cost (nsamples, 1)"""
-    obj_cost = torch.square(Y - Yhat)
+    obj_cost = torch.square(Y - Yhat) * 100
     return obj_cost
 
 
@@ -308,7 +319,8 @@ def dict_agg(stats, key, value, op="concat"):
 def eval_net(data, X, Y, net, args, prefix, stats):
     make_prefix = lambda x: "{}_{}".format(prefix, x)
     start_time = time.time()
-    Yhat = net(X)
+    # ipdb.set_trace()
+    Yhat = net(X.squeeze(-1))
     end_time = time.time()
     # print(f"{X=} {Y=}")
     dict_agg(
@@ -320,7 +332,7 @@ def eval_net(data, X, Y, net, args, prefix, stats):
 
 
 @torch.no_grad()
-def infer_net(data, args, dir_dict=None):
+def infer_net(model, data, args, dir_dict=None):
     "Intuitvely evaluate random test data by inference"
 
     dataset = TensorDataset(data.Xc, data.Y0)
@@ -331,14 +343,12 @@ def infer_net(data, args, dir_dict=None):
             data.train_num + data.valid_num + data.test_num,
         ),
     )
-    model = IpNet(data, args)
-    model.load_state_dict(
-        torch.load(dir_dict["infer_dir"], map_location=torch.device("cpu"))
-    )
+
+    model.load_state_dict(torch.load(dir_dict["infer_dir"], map_location=DEVICE))
     model.eval()
 
     # Warm up the GPU
-    X_dummy = torch.Tensor(500, data.xc_dim, 1).uniform_(-0.5, 0.5)
+    X_dummy = torch.Tensor(500, data.xc_dim).uniform_(-0.5, 0.5)
     _ = model(X_dummy.to(args["device"]))
 
     # total_time = 0.0
@@ -349,77 +359,23 @@ def infer_net(data, args, dir_dict=None):
         X, Y0 = test_dataset[idx]
         X = X.unsqueeze(0)
         start_time = time.time()
-        Ynn = model(X)
+        Ynn = model(X.squeeze(-1))
         # total_time += time.time() - start_time
         Xo = X[0][0]
         # print(f"{Xo   = :.4f}")
-        utils.printInBoldGreen(f"{Y0  = }\n{Ynn = }")
+        utils.printInBoldGreen(f"Y0  = {Y0.transpose(-1, -2)}\n{Ynn = }")
         print("--")
 
     test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
     for test_batch in test_loader:
         Xtest = test_batch[0].to(args["device"])
         start_time = time.time()
-        Ytest_nn = model(Xtest)
+        Ytest_nn = model(Xtest.squeeze(-1))
         total_time = time.time() - start_time
 
     print(f"{len(test_dataset) = }")
     infer_time = total_time / len(test_dataset)
     print(f"{infer_time=}")
-
-
-###################################################################
-# MODEL
-###################################################################
-class IpNet(nn.Module):
-    def __init__(self, data, args):
-        super().__init__()
-        self._data = data
-        self._args = args
-
-        # number of hidden layers and its size
-        layer_sizes = [
-            self._data.xc_dim,
-            self._args["hidden_size"],
-            self._args["hidden_size"],
-        ]
-        # layers = reduce(
-        #     operator.add,
-        #     [
-        #         # [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU()]
-        #         [nn.Linear(a, b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.1)]
-        #         for a, b in zip(layer_sizes[0:-1], layer_sizes[1:])
-        #     ],
-        # )
-
-        layers = [
-            # nn.BatchNorm1d(layer_sizes[0]),
-            nn.Linear(4, layer_sizes[1]),
-            nn.BatchNorm1d(layer_sizes[1]),
-            nn.ReLU(),
-            # nn.Dropout(p=0.4),
-            # nn.BatchNorm1d(layer_sizes[1]),
-            nn.Linear(layer_sizes[1], layer_sizes[2]),
-            nn.BatchNorm1d(layer_sizes[2]),
-            nn.ReLU(),
-            # nn.Dropout(p=0.4),
-            # nn.BatchNorm1d(layer_sizes[2]),
-            # nn.Linear(layer_sizes[1], layer_sizes[2]),
-            # nn.ReLU(),
-            # nn.Dropout(p=0.4),
-            # nn.BatchNorm1d(layer_sizes[2]),
-            nn.Linear(layer_sizes[2], 2),
-        ]
-
-        for layer in layers:
-            if type(layer) == nn.Linear:
-                nn.init.kaiming_normal_(layer.weight)
-
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, x):
-        # x is 3D
-        return self.net(x.squeeze(-1))
 
 
 if __name__ == "__main__":
