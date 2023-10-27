@@ -36,7 +36,7 @@ from CbfSocProblem import CbfSocProblem
 
 # DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 DEVICE = torch.device("cpu")
-# torch.set_default_device(DEVICE)
+torch.set_default_device(DEVICE)
 torch.set_default_dtype(torch.float64)
 np.set_printoptions(precision=4)
 
@@ -101,7 +101,7 @@ def main():
         "xo": 3,
         "xc": 6,
         "nsamples": 15000,
-        "method": "RAYEN2",
+        "method": "RAYEN3",
         "training": False,
         "loss_type": "unsupervised",
         "epochs": 200,
@@ -115,8 +115,8 @@ def main():
         "seed": seed,
         "device": DEVICE,
         "board": False,
-        "cbf_nn_dir": "Oct23_17-17-13",
-        "ip_nn_dir": "Oct23_15-12-34",
+        "cbf_nn_dir": "Oct26_09-24-47",  # "Oct23_17-25-01",  # change
+        "ip_nn_dir": "Oct23_15-12-34",  # keep this
     }
     print(args)
 
@@ -203,9 +203,6 @@ def main():
     )
     cbf_net.eval()
 
-    time_opt_sum = 0
-    time_nn_sum = 0
-
     x0 = torch.Tensor([[[0.0], [0.0], [0.0]]])  # shape = (1, n, 1)
     v0 = torch.Tensor([[[0.1], [0.1], [-0.2]]])  # shape = (1, n, 1)
     x0_n = x0.clone()
@@ -213,21 +210,19 @@ def main():
 
     system = DoubleIntegrator(x0, v0, 1e-2)
     system_n = DoubleIntegrator(x0_n, v0_n, 1e-2)
-    u_filtered = None
-    un_filtered = None
+    u_opt = None
+    u_nn = None
 
-    steps = 400
     # plt.draw()
     # plt.pause(5)
     # utils.printInBoldBlue("STARTTTTTTTTTTTTTTTTTTT")
     # plt.pause(3.5)
+    stats = Statistics()
+    steps = 200
     with torch.no_grad():
         for i in range(steps):
-            utils.printInBoldBlue(f"step = {i}")
-            x, v = system.dynamics(u_filtered)
-            xn, vn = system_n.dynamics(un_filtered)
-            print(f"{x.squeeze() = }; {v.squeeze() = }")
-            print(f"{xn.squeeze() = }; {vn.squeeze() = }")
+            x, v = system.dynamics(u_opt)
+            xn, vn = system_n.dynamics(u_nn)
 
             # print(torch.norm(v - vn))
 
@@ -245,56 +240,28 @@ def main():
             )
             # u_nom = torch.tensor([[[0.1], [0.1], [-0.01]]])
 
-            un_filtered, time_nn = nn_infer(cbf_net, xn, vn, u_nom)
-            u_filtered, time_opt = opt_solve(x, v, u_nom)
-            time_nn_sum += time_nn
-            time_opt_sum += time_opt
+            u_nn, time_nn = nn_infer(cbf_net, xn, vn, u_nom)
+            u_opt, time_opt, time_opt2 = opt_solve(x, v, u_nom)
+            stats._all_time_nn.append(time_nn)
+            stats._all_time_opt.append(time_opt)
+            stats._all_time_opt2.append(time_opt2)
+            stats._all_obj_nn.append(torch.norm(u_nn - u_nom).numpy())
+            stats._all_obj_opt.append(torch.norm(u_opt - u_nom).numpy())
             # assert torch.norm(u_filtered) < 1.01
             # assert torch.norm(un_filtered) < 1.01 and torch.norm(u_filtered) < 1.01
 
-            print(f"{u_nom.squeeze() = }; {u_filtered.squeeze() = }")
-            print(f"{u_nom.squeeze() = }; {un_filtered.squeeze() = } \n")
+            verbose = 0
+            if verbose:
+                utils.printInBoldBlue(f"step = {i}")
+                print(f"{x.squeeze() = }; {v.squeeze() = }")
+                print(f"{xn.squeeze() = }; {vn.squeeze() = }")
+                print(f"{u_nom.squeeze() = }; {u_opt.squeeze() = }")
+                print(f"{u_nom.squeeze() = }; {u_nn.squeeze() = } \n")
 
-            # add something to axes
-            size = 200.0
-            ax.scatter(
-                un_filtered.squeeze()[0],
-                un_filtered.squeeze()[1],
-                un_filtered.squeeze()[2],
-                s=size,
-                c="#f0746e",
-                marker="*",
-            )
-            ax.scatter(
-                u_filtered.squeeze()[0],
-                u_filtered.squeeze()[1],
-                u_filtered.squeeze()[2],
-                s=size,
-                c="#7ccba2",
-                marker="*",
-                alpha=1,
-            )
-            ax.scatter(
-                u_nom.squeeze()[0],
-                u_nom.squeeze()[1],
-                u_nom.squeeze()[2],
-                s=size,
-                c="gray",
-                marker="*",
-                alpha=1,
-            )
-            ax.plot_surface(x_soc, y_soc, z_soc, color="#3c93c2", alpha=0.05)
-            ax.plot_surface(x_sphere, y_sphere, z_sphere, color="#fcde9c", alpha=0.04)
-            # draw the plot
-            plt.draw()
-            plt.pause(0.0001)  # is necessary for the plot to update for some reason
-            # start removing points if you don't want all shown
-            if i > 0:
-                [ax.collections[0].remove() for _ in range(5)]
-                plt.legend(["u_nn", "u_opt", "u_nom"], loc=2)
+            # draw_scene(un_filtered, u_filtered, u_nom, i)
 
-    print(f"average nn time = {time_nn_sum/steps}")
-    print(f"average opt time = {time_opt_sum/steps}")
+    stats.compute()
+    print(stats)
 
 
 def nn_infer(model, xn, vn, u_nom):
@@ -302,7 +269,7 @@ def nn_infer(model, xn, vn, u_nom):
     start_time = time.time()
     un_filtered = model(input_n)
     infer_time = time.time() - start_time
-    print(f"inference time = {infer_time}")
+    # print(f"inference time = {infer_time}")
     un_filtered.nelement() == 0 and utils.printInBoldRed("NN failed")
     return un_filtered, infer_time
 
@@ -313,11 +280,11 @@ def opt_solve(x, v, u_nom):
     problem.updateObjective()
     problem.updateConstraints()
     start_time = time.time()
-    problem.computeY(tol=1e-2)
-    opt_time = time.time() - start_time
+    _, opt_time = problem.computeY(tol=1e-2, max_iters=1000)
+    opt_time2 = time.time() - start_time
     u_filtered = problem.Y
     u_filtered.nelement() == 0 and utils.printInBoldRed("Solver failed")
-    return u_filtered.unsqueeze(-1), opt_time
+    return u_filtered.unsqueeze(-1), opt_time, opt_time2
 
 
 ###################################################################
@@ -352,6 +319,94 @@ class DoubleIntegrator:
         self._x += self._v * self.dt
         self._t += self.dt
         return self.x, self.v
+
+
+class Statistics:
+    def __init__(self):
+        self._all_obj_nn = []
+        self._mean_obj_nn = 0.0
+        self._std_obj_nn = 0.0
+        self._all_obj_opt = []
+        self._mean_obj_opt = 0.0
+        self._std_obj_opt = 0.0
+        self._all_time_nn = []
+        self._mean_time_nn = 0.0
+        self._std_time_nn = 0.0
+        self._all_time_opt = []
+        self._mean_time_opt = 0.0
+        self._std_time_opt = 0.0
+        self._all_time_opt2 = []
+        self._mean_time_opt2 = 0.0
+        self._std_time_opt2 = 0.0
+
+    def compute(self):
+        # Compute mean and std
+        self._mean_obj_nn = np.mean(
+            np.array(self._all_obj_nn) / np.array(self._all_obj_opt)
+        )
+        import pdb
+
+        # pdb.set_trace()
+        self._std_obj_nn = np.std(
+            np.array(self._all_obj_nn) / np.array(self._all_obj_opt)
+        )
+        self._mean_obj_opt = np.mean(self._all_obj_opt)
+        self._std_obj_opt = np.std(self._all_obj_opt)
+        self._mean_time_nn = np.mean(self._all_time_nn)
+        self._std_time_nn = np.std(self._all_time_nn)
+        self._mean_time_opt = np.mean(self._all_time_opt)
+        self._std_time_opt = np.std(self._all_time_opt)
+        self._mean_time_opt2 = np.mean(self._all_time_opt2)
+        self._std_time_opt2 = np.std(self._all_time_opt2)
+
+    def __repr__(self) -> str:
+        return (
+            f"mean_l2_nn    = {self._mean_obj_nn:.4f} ({self._std_obj_nn:.4f})\n"
+            f"mean_l2_opt   = {self._mean_obj_opt:.4f} ({self._std_obj_opt:.4f}) \n"
+            f"mean_time_nn  = {self._mean_time_nn:.4f} ({self._std_time_nn:.4f}) \n"
+            f"mean_time_opt2 = {self._mean_time_opt2:.4f} ({self._std_time_opt2:.4f}) \n"
+            f"mean_time_opt = {self._mean_time_opt:.8f} ({self._std_time_opt:.4f}) \n"
+        )
+
+
+def draw_scene(un_filtered, u_filtered, u_nom, i):
+    # add something to axes
+    size = 200.0
+    ax.scatter(
+        un_filtered.squeeze()[0],
+        un_filtered.squeeze()[1],
+        un_filtered.squeeze()[2],
+        s=size,
+        c="#f0746e",
+        marker="*",
+    )
+    ax.scatter(
+        u_filtered.squeeze()[0],
+        u_filtered.squeeze()[1],
+        u_filtered.squeeze()[2],
+        s=size,
+        c="#7ccba2",
+        marker="*",
+        alpha=1,
+    )
+    ax.scatter(
+        u_nom.squeeze()[0],
+        u_nom.squeeze()[1],
+        u_nom.squeeze()[2],
+        s=size,
+        c="gray",
+        marker="*",
+        alpha=1,
+    )
+    ax.plot_surface(x_soc, y_soc, z_soc, color="#3c93c2", alpha=0.05)
+    ax.plot_surface(x_sphere, y_sphere, z_sphere, color="#fcde9c", alpha=0.04)
+    # draw the plot
+    plt.draw()
+    plt.pause(0.0001)  # is necessary for the plot to update for some reason
+    # start removing points if you don't want all shown
+    if i > 0:
+        [ax.collections[0].remove() for _ in range(5)]
+        plt.legend(["u_nn", "u_opt", "u_nom"], loc=2)
 
 
 if __name__ == "__main__":

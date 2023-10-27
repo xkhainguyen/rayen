@@ -347,9 +347,9 @@ class SocProblem(ABC):
             self._d,
         )
 
-    def optimizationSolve(self, X, solver_type="cvxpy_ecos", tol=1e-5):
+    def optimizationSolve(self, X, solver_type="cvxpy_ecos", tol=1e-5, max_iters=100):
         if solver_type == "cvxpy_ecos":
-            utils.printInBoldBlue("running cvxpy with ecos")
+            # utils.printInBoldBlue("running cvxpy with ecos")
             Po, qo, A1, b1, P, q, r, M, s, c, d = (
                 self.Po_np,
                 self.qo_np,
@@ -384,14 +384,15 @@ class SocProblem(ABC):
                 prob.solve(
                     solver=cp.ECOS,
                     verbose=False,
-                    max_iters=100,
+                    max_iters=max_iters,
                     abstol=tol,
                     reltol=tol,
                     feastol=tol,
                 )
                 end_time = time.time()
 
-                total_time += end_time - start_time
+                # total_time += end_time - start_time
+                total_time += prob.solver_stats.solve_time
                 if prob.status == "optimal":
                     Y.append(y.value.flatten())
                     obj_val.append(prob.value)
@@ -401,22 +402,22 @@ class SocProblem(ABC):
             sols = np.array(Y)
             obj_val = np.array(obj_val)
             parallel_opt_time = total_time / len(X_np)
-            print(f"{parallel_opt_time=}")
+            # print(f"{parallel_opt_time=}")
         else:
             raise NotImplementedError
 
         return sols, obj_val, total_time, parallel_opt_time
 
-    def computeY(self, tol=1e-8):
-        Y, obj_val, *_ = self.optimizationSolve(
-            self.X, solver_type="cvxpy_ecos", tol=tol
+    def computeY(self, tol=1e-8, max_iters=100):
+        Y, obj_val, _, parallel_opt_time = self.optimizationSolve(
+            self.X, solver_type="cvxpy_ecos", tol=tol, max_iters=max_iters
         )
         feas_mask = ~np.isnan(Y).all(axis=1)
         self._nsamples = feas_mask.sum()
         self._X = self._X[feas_mask]
         self._Y = torch.tensor(Y[feas_mask])
         self._obj_val = torch.tensor(obj_val[feas_mask])
-        return Y
+        return Y, parallel_opt_time
 
     @property
     def Y0_np(self):
