@@ -1,4 +1,4 @@
-# RAYEN: Imposition of Hard Convex Constraints on Neural Networks #
+# RAYEN++: Towards Non-Fixed Convex Hard Constraints on Neural Networks and Applications #
 
 Paper: Coming soon....
 
